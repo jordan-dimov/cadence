@@ -49,25 +49,25 @@ class BacktestResult:
 
 
 def backtest_signal(
-    spread: np.ndarray,
+    gap: np.ndarray,
     signals: np.ndarray,
     cost_per_trade: float = 0.5,
 ) -> BacktestResult:
     """Replay a buy/sell/do-nothing strategy over past data and score it.
 
-    `spread` is the price gap over time; `signals` is what the strategy
-    decided at each step (+1 buy, -1 sell, 0 nothing). `cost_per_trade` is
-    what we charge, per unit, each time the position changes.
+    `gap` is the price gap over time; `signals` is what the strategy decided
+    at each step (+1 buy, -1 sell, 0 nothing). `cost_per_trade` is what we
+    charge, per unit, each time the position changes.
 
     The important detail: we hold *yesterday's* decision into *today's* price
     move. That one-step delay is what stops the strategy from cheating by
     reacting to a move it should not yet have seen.
     """
-    if spread.shape != signals.shape:
-        raise ValueError("spread and signals must be the same length")
+    if gap.shape != signals.shape:
+        raise ValueError("gap and signals must be the same length")
     # Yesterday's decision, applied to today: shift the signals by one step.
     position = np.concatenate([[0], signals[:-1]])
-    todays_move = np.diff(spread, prepend=spread[0])
+    todays_move = np.diff(gap, prepend=gap[0])
     profit_before_costs = position * todays_move
 
     # Charge a cost every time we change our position.

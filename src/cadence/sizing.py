@@ -33,26 +33,18 @@ def optimal_volume(
 ) -> float:
     """Work out how much Alice should sell in advance.
 
-    Inputs:
-      - `dist` is her forecast, not as a single number but as a range of
-        possible outcomes (see the forecast module for why that matters).
-      - `short_cost` is how much it costs her, per MWh, to sell too much
-        (she has to buy the shortfall back).
-      - `long_cost` is how much it costs her, per MWh, to sell too little
-        (she has to offload the surplus late).
+    `dist` is her forecast as a range (see the forecast module). `short_cost`
+    is the cost per MWh of selling too much (buying the shortfall back);
+    `long_cost` is the cost per MWh of selling too little (offloading the
+    surplus late).
 
-    The rule that balances the two costs is an old and well known one (it is
-    called the "newsvendor" problem, after a newsagent deciding how many
-    papers to stock: too few and you miss sales, too many and they go to
-    waste). It says: pick the sell amount that the forecast expects her to
-    beat with this probability:
-
-        long_cost / (short_cost + long_cost)
-
-    A quick sanity check on that fraction. If the two costs are equal, it is
-    1/2, so she sells her middle estimate. If selling too much is twice as
-    painful (short_cost high), the fraction drops below 1/2, so she sells
-    less. That is exactly the safer behaviour we wanted.
+    The rule that balances them is a classic one, the "newsvendor" problem
+    (after a newsagent deciding how many papers to stock: too few and you miss
+    sales, too many and they go to waste). Sell the amount the forecast
+    expects to be beaten with probability long_cost / (short_cost + long_cost).
+    Sanity check: equal costs give 1/2, so she sells her middle estimate; if
+    selling too much hurts more, the fraction drops below 1/2 and she sells
+    less, which is the safer side.
     """
     if short_cost <= 0 or long_cost <= 0:
         raise ValueError("costs must be positive")

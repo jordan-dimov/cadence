@@ -11,8 +11,8 @@ Three ways to schedule the pieces, each fixing a weakness of the one before:
 
   - Spread them evenly over time (simple, but ignores how urgent it is).
   - Trade harder as the deadline approaches (smarter about urgency).
-  - Trade bigger when the market is deep, smaller when it is thin (smartest,
-    sketched here and finished in the guide).
+  - Size each piece to how much is on offer right now, so as not to push the
+    price (smartest; `liquidity_aware_clip`).
 
 The deadline matters a lot in power. Every product has a "gate closure": a
 cut-off after which you can no longer trade it. Miss it with power still
@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+
+from .data import OrderBook
 
 
 def twap_schedule(total_qty: float, n_slices: int) -> np.ndarray:
@@ -68,6 +70,23 @@ def urgency_schedule(
     weights = time_left**alpha
     weights = weights / weights.sum()
     return weights * total_qty
+
+
+def liquidity_aware_clip(
+    remaining_qty: float, book: OrderBook, max_fraction: float = 0.5
+) -> float:
+    """Decide how big the next piece should be from how much is on offer now.
+
+    When the book is deep we can trade a bigger piece; when it is thin we
+    trade a smaller one, so we do not push the price against ourselves. We
+    never take more than `max_fraction` of what is resting at the best price
+    level, nor more than what is left to trade. (This sizes a buy against the
+    best ask; selling works the same way against the best bid.)
+    """
+    if remaining_qty < 0:
+        raise ValueError("remaining_qty cannot be negative")
+    depth_at_best = float(book.ask_sizes[0])
+    return min(remaining_qty, max_fraction * depth_at_best)
 
 
 def cost_of_waiting(

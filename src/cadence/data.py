@@ -107,33 +107,31 @@ def simulated_orderbook(
     thinning out as you go further away.
     """
     rng = _rng(seed)
-    spread = tick * rng.integers(1, 4)  # gap between best bid and best ask
+    bid_ask_gap = tick * rng.integers(1, 4)
     sizes = np.abs(rng.normal(8, 3, levels)).round(1) + 1.0
-    bid_prices = mid - spread / 2 - tick * np.arange(levels)
-    ask_prices = mid + spread / 2 + tick * np.arange(levels)
+    bid_prices = mid - bid_ask_gap / 2 - tick * np.arange(levels)
+    ask_prices = mid + bid_ask_gap / 2 + tick * np.arange(levels)
     return OrderBook(bid_prices, sizes.copy(), ask_prices, sizes.copy())
 
 
-def simulated_spread_series(days: int = 30, seed: int = 0) -> np.ndarray:
-    """Invent the price *gap* between two neighbouring countries, hour by
-    hour, over several days.
+def simulated_country_gap(days: int = 30, seed: int = 0) -> np.ndarray:
+    """Invent the price gap between two neighbouring countries, hour by hour,
+    over several days. (Traders call this gap a "spread".)
 
-    Power often costs slightly more in one country than its neighbour. That
-    gap wanders around but tends to drift back toward zero (if it gets too
-    wide, traders pile in and close it). It also wobbles with the time of
-    day as solar comes and goes. The stat-arb bot in the signals module
-    tries to profit from that drift-back. One value per delivery hour.
+    Power often costs slightly more in one country than its neighbour. The gap
+    wanders about but tends to drift back toward zero: when it gets too wide,
+    traders pile in and close it. On top of that it has a daily swing as solar
+    comes and goes. Dan's bot (in the signals module) tries to profit from the
+    drift-back. One value per delivery hour.
     """
     rng = _rng(seed)
     n = days * 24
-    pull_back, centre, jitter = 0.15, 0.0, 2.5
+    pull_back, jitter = 0.15, 2.5
     gap = np.empty(n)
     gap[0] = 0.0
     hour_of_day = np.arange(n) % 24
-    daily_wobble = 1.5 * np.sin((hour_of_day - 13) / 24 * 2 * np.pi)
+    daily_swing = 1.5 * np.sin((hour_of_day - 13) / 24 * 2 * np.pi)
     for i in range(1, n):
-        # Each hour: drift back toward the centre, plus a random nudge.
-        gap[i] = gap[i - 1] + pull_back * (centre - gap[i - 1]) + rng.normal(
-            0, jitter
-        )
-    return gap + daily_wobble
+        # Each hour: drift a little back toward zero, plus a random nudge.
+        gap[i] = gap[i - 1] * (1 - pull_back) + rng.normal(0, jitter)
+    return gap + daily_swing

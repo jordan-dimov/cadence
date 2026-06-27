@@ -27,6 +27,7 @@ renting.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from statistics import NormalDist
 
 import numpy as np
 
@@ -54,16 +55,7 @@ class ForecastDistribution:
         """
         if not 0.0 < q < 1.0:
             raise ValueError("the fraction q must be between 0 and 1")
-        from statistics import NormalDist
-
         return NormalDist(self.mean, self.std).inv_cdf(q)
-
-    def scenarios(self, n: int, seed: int = 0) -> np.ndarray:
-        """Draw `n` example outcomes from the range, for when you want to
-        try a decision against many possible futures rather than reason
-        about the range mathematically."""
-        rng = np.random.default_rng(seed)
-        return rng.normal(self.mean, self.std, n)
 
 
 class PriceForecaster:

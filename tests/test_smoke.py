@@ -10,6 +10,7 @@ from cadence.backtest import backtest_signal
 from cadence.execution import (
     FillReconciler,
     cost_of_waiting,
+    liquidity_aware_clip,
     twap_schedule,
     urgency_schedule,
 )
@@ -49,6 +50,10 @@ def test_execution_schedulers_and_reconciliation():
     assert front[0] > front[-1]
     assert cost_of_waiting(0.5, 200) == 100.0
 
+    # A clip is capped by what is on offer at the best level.
+    thin = data.simulated_orderbook(levels=5, seed=1)
+    assert liquidity_aware_clip(1000.0, thin) <= float(thin.ask_sizes[0])
+
     rec = FillReconciler(target=10.0)
     rec.record_fill(4.0)
     assert rec.residual == 6.0 and not rec.is_complete
@@ -57,18 +62,18 @@ def test_execution_schedulers_and_reconciliation():
 
 
 def test_signals_no_lookahead():
-    spread = data.simulated_spread_series(days=30, seed=3)
-    z = rolling_zscore(spread, window=48)
+    gap = data.simulated_country_gap(days=30, seed=3)
+    z = rolling_zscore(gap, window=48)
     assert np.isnan(z[:48]).all()  # no signal before a full window
-    sig = zscore_signals(spread, window=48, threshold=2.0)
+    sig = zscore_signals(gap, window=48, threshold=2.0)
     assert set(np.unique(sig)).issubset({-1, 0, 1})
 
 
 def test_backtest_charges_costs():
-    spread = data.simulated_spread_series(days=60, seed=4)
-    sig = zscore_signals(spread, window=14 * 24, threshold=2.0)
-    free = backtest_signal(spread, sig, cost_per_trade=0.0)
-    costed = backtest_signal(spread, sig, cost_per_trade=1.0)
+    gap = data.simulated_country_gap(days=60, seed=4)
+    sig = zscore_signals(gap, window=14 * 24, threshold=2.0)
+    free = backtest_signal(gap, sig, cost_per_trade=0.0)
+    costed = backtest_signal(gap, sig, cost_per_trade=1.0)
     assert costed.pnl <= free.pnl  # honest costs never improve P&L
     assert costed.n_trades >= 0
 

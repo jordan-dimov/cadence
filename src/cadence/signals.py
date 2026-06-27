@@ -10,10 +10,10 @@ stretches unusually wide. When it does, it tends to snap back. So when the
 gap looks abnormally large, Dan bets it will return to normal.
 
 How do we measure "abnormally large"? We compare today's gap to how the gap
-has behaved recently, its recent average and its recent wobbliness. If the
-gap is more than two wobbles away from its recent average, that is unusual
-enough to act on. (The "number of wobbles away from average" has a name, the
-z-score, used below.)
+has behaved recently: its recent average, and how much it usually varies
+(its spread). If the gap is more than two spreads away from its recent
+average, that is unusual enough to act on. (The "number of spreads away from
+average" has a name, the z-score, used below.)
 
 Crucially, we only ever look at the *past* when judging today. Peeking at the
 future, even by accident, is the single biggest way to fool yourself into

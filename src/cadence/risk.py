@@ -151,40 +151,32 @@ class MorphologUnavailable(RuntimeError):
 class MorphologGovernor:
     """The same safety gate, but enforced by Morpholog instead of by Python.
 
-    The difference that matters: the position limit is written down as a rule
-    inside Morpholog, and Morpholog simply will not record an order that
-    breaks it, no matter how the order arrives. The rules live in the file
-    cadence.morph next to this code, where a risk officer or auditor can read
-    them without reading any Python.
-
-    Setting it up needs the `morpholog` program, a throwaway database, and a
-    one-off step to generate the typed client:
+    The rules live in cadence.morph, next to this code, where a risk officer
+    or auditor can read them without reading any Python. Morpholog will not
+    record an order that breaks them, no matter how the order arrives. Setting
+    it up needs the `morpholog` program, a throwaway database, and a one-off
+    step to generate the typed client:
 
         morpholog generate python-client cadence.morph --out src/cadence/_morph_client
 
-    A few things this version gets for free, which the plain one above cannot:
+    Three things this version gets for free that the plain one cannot:
 
-      - To ask "would this order be allowed?" without placing it, the gate
-        uses `morpholog explain` rather than `morpholog propose`: same check,
-        nothing recorded. That is the pre-trade dry run.
-      - To read the live position, the gate reads the NetPosition figure
-        Morpholog keeps up to date (see cadence.morph), instead of holding
-        its own counter that could drift out of step.
-      - To admit a burst of orders in one go (an auction, a batch of slices),
-        it uses `morpholog propose --batch` rather than one call per order.
+      - A pre-trade dry run: `morpholog explain` answers "would this order be
+        allowed?" without recording anything.
+      - A live position to read straight from the governed record (the
+        NetPosition figure in cadence.morph), instead of its own counter that
+        could drift out of step.
+      - Bursts in one call: `morpholog propose --batch` for an auction or a
+        batch of slices.
 
-    Morpholog keeps its record in a real (PostgreSQL) database on purpose:
-    that durable, tamper-evident store is the whole reason it can survive a
-    restart and be replayed later, which an in-memory version would throw
-    away. The cost is that it runs as a separate program. For heavier use a
-    resident `morpholog serve` process avoids paying that start-up cost on
-    every call; that is the production shape, walked through in Section 8.
-
-    The methods are left for the guide's Section 8 to fill in, so that the
-    examples here keep running with nothing extra installed. The point the
-    guide makes is that almost none of the rule-checking ends up in Python
-    once Morpholog holds the rules: the plain version above is what you get
-    to delete.
+    The PostgreSQL database is deliberate: it gives the record a real, durable
+    home that survives a restart. Morpholog then builds its tamper-evidence on
+    top (an append-only, hash-chained audit it can replay and verify); the
+    database supplies durability, Morpholog supplies the tamper-evidence. The
+    cost is running as a separate program; a resident `morpholog serve`
+    process avoids paying the start-up cost per call. The methods below are
+    filled in during the guide's Section 8, so the examples here keep running
+    with nothing extra installed.
     """
 
     def __init__(self, database_url: str | None = None) -> None:
