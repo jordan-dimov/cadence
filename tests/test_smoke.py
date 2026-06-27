@@ -18,7 +18,12 @@ from cadence.execution import (
 from cadence.forecast import ForecastDistribution, Forecaster
 from cadence.pipeline import compare_perfect_and_realistic, run_day, run_period
 from cadence.risk import InProcessGovernor, Order, make_governor
-from cadence.signals import rolling_zscore, run_stat_arb, zscore_signals
+from cadence.signals import (
+    rolling_zscore,
+    run_stat_arb,
+    stat_arb_positions,
+    zscore_signals,
+)
 from cadence.sizing import optimal_volume
 
 
@@ -102,6 +107,22 @@ def test_stat_arb_lifecycle_opens_and_closes():
     for t in trades:
         assert t.exit > t.entry
         assert t.direction in (-1, 1)
+    # The trades and the position series describe the same lifecycle.
+    positions = stat_arb_positions(gap, window=14 * 24)
+    assert set(np.unique(positions)).issubset({-1, 0, 1})
+
+
+def test_order_rejects_zero_quantity_and_bad_price():
+    with pytest.raises(ValueError):
+        Order("o", "s", "b", 0, 80)      # zero size is not a trade
+    with pytest.raises(ValueError):
+        Order("o", "s", "b", 10, 0)      # price must be positive
+
+
+def test_liquidity_clip_validates_side():
+    book = data.simulated_orderbook(seed=1)
+    with pytest.raises(ValueError):
+        liquidity_aware_clip(10.0, book, "bid")  # must be 'buy' or 'sell'
 
 
 def test_perfect_foresight_costs_less_than_realistic():

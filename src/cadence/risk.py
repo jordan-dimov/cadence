@@ -55,6 +55,13 @@ class Order:
     signed_qty: float
     price: float
 
+    def __post_init__(self) -> None:
+        # A zero-size or non-positive-price order is a bug, not a trade.
+        if self.signed_qty == 0:
+            raise ValueError("order quantity cannot be zero")
+        if self.price <= 0:
+            raise ValueError("order price must be positive")
+
 
 @dataclass(frozen=True)
 class Decision:

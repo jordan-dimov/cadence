@@ -90,6 +90,8 @@ def liquidity_aware_clip(
     level, nor more than what is left to trade. A buy looks at the best ask
     (what sellers are offering); a sell looks at the best bid.
     """
+    if side not in ("buy", "sell"):
+        raise ValueError("side must be 'buy' or 'sell'")
     if remaining_qty < 0:
         raise ValueError("remaining_qty cannot be negative")
     depth_at_best = book.ask_sizes[0] if side == "buy" else book.bid_sizes[0]

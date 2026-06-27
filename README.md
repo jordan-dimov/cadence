@@ -29,7 +29,7 @@ Two simple bots, on purpose, because they are two different kinds of trading:
 | `forecast` | 3 | Guesses a future number as a *range*, not a single value |
 | `sizing` | 4 | Decides how much to sell, leaning to the safe side |
 | `execution` | 5 | Places orders in small pieces so as not to move the price |
-| `signals` | 6 | Spots a tradeable price gap between two countries |
+| `signals` | 6 | The z-score signal and a small stat-arb lifecycle (enter, hold, exit) |
 | `backtest` | 7 | Honestly checks whether a strategy would have made money |
 | `risk` | 8 | The safety gate every order must pass before it is sent |
 | `pipeline` | 9 | The finale: every piece working together as one bot |
@@ -55,7 +55,7 @@ idea, so you can watch each piece work:
 uv run python examples/01_market_data.py   # invent a day of prices and wind
 uv run python examples/02_alice_sizing.py  # how much to sell, and why less than the forecast
 uv run python examples/03_execution.py     # work an order in pieces
-uv run python examples/04_dan_backtest.py  # a signal, backtested honestly with costs
+uv run python examples/04_dan_stat_arb.py  # a stat-arb lifecycle, backtested honestly with costs
 uv run python examples/05_risk_gate.py     # what the safety gate lets through
 ```
 

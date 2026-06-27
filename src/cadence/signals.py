@@ -86,6 +86,36 @@ class Trade:
     pnl: float
 
 
+def stat_arb_positions(
+    gap: np.ndarray,
+    window: int = 14 * 24,
+    enter_threshold: float = 2.0,
+    exit_threshold: float = 0.5,
+) -> np.ndarray:
+    """The position the lifecycle holds at each hour: +1 long the gap, -1 short
+    it, 0 flat. Enter when the z-score crosses `enter_threshold`, hold, and
+    exit once it falls back inside `exit_threshold`.
+
+    Note this is a different rule from the bare `zscore_signals` (which only
+    says +1/-1 while the z-score is past the entry level). Backtest THIS series
+    with `backtest_signal` to score the actual strategy, not the signal.
+    """
+    z = rolling_zscore(gap, window)
+    positions = np.zeros(gap.size, dtype=int)
+    held = 0
+    for i in range(gap.size):
+        if not np.isnan(z[i]):
+            if held == 0:
+                if z[i] >= enter_threshold:
+                    held = -1
+                elif z[i] <= -enter_threshold:
+                    held = 1
+            elif abs(z[i]) < exit_threshold:
+                held = 0
+        positions[i] = held
+    return positions
+
+
 def run_stat_arb(
     gap: np.ndarray,
     window: int = 14 * 24,
@@ -95,28 +125,23 @@ def run_stat_arb(
     """Turn the signal into a bot: the small state machine the guide describes.
 
     A signal tells you *when* to act; a strategy is the lifecycle of acting.
-    Here it is: stay flat until the gap is more than `enter_threshold` spreads
-    from normal, then go in (sell the gap if it is unusually high, buy it if
-    unusually low), and come back out once it has drifted back within
-    `exit_threshold` spreads of normal, banking the move. Returns one Trade per
-    completed round trip. The difference from just reading the signal is the
-    whole point: entry, holding, and exit are a lifecycle, not a single tick.
+    This returns one Trade per completed round trip, and it is built on
+    `stat_arb_positions`, so the round trips here and a backtest of those
+    positions describe exactly the same strategy. The difference from just
+    reading the signal is the whole point: entry, holding, and exit are a
+    lifecycle, not a single tick.
     """
-    z = rolling_zscore(gap, window)
+    positions = stat_arb_positions(gap, window, enter_threshold, exit_threshold)
     trades: list[Trade] = []
-    position = 0
+    held = 0
     entry_index = 0
     entry_gap = 0.0
     for i in range(gap.size):
-        if np.isnan(z[i]):
+        if positions[i] == held:
             continue
-        if position == 0:
-            if z[i] >= enter_threshold:
-                position, entry_index, entry_gap = -1, i, float(gap[i])
-            elif z[i] <= -enter_threshold:
-                position, entry_index, entry_gap = 1, i, float(gap[i])
-        elif abs(z[i]) < exit_threshold:
-            pnl = position * (float(gap[i]) - entry_gap)
-            trades.append(Trade(entry_index, i, position, pnl))
-            position = 0
+        if held != 0:  # closing the position we were holding
+            trades.append(Trade(entry_index, i, held, held * (float(gap[i]) - entry_gap)))
+        if positions[i] != 0:  # opening a new one
+            entry_index, entry_gap = i, float(gap[i])
+        held = positions[i]
     return trades

@@ -48,6 +48,25 @@ def simulated_generation(
     return fraction_of_capacity * capacity_mw * 0.25  # MWh in 15 minutes
 
 
+def simulated_period_history(
+    period: int, days: int = 30, capacity_mw: float = 100.0, seed: int = 0
+) -> np.ndarray:
+    """Invent recent output readings for the SAME delivery period across many
+    past days (in MWh).
+
+    This is the history a forecaster should actually fit on: not one day's 96
+    different periods, but the same quarter-hour slot seen on each of the last
+    `days` days. Wind output for a given slot varies day to day with the
+    weather, around a typical level, which is exactly what these readings show.
+    """
+    if not 0 <= period < PERIODS_PER_DAY:
+        raise ValueError(f"period must be in 0..{PERIODS_PER_DAY - 1}")
+    rng = _rng(seed * PERIODS_PER_DAY + period)
+    typical_load_factor = 0.45
+    load_factors = np.clip(rng.normal(typical_load_factor, 0.12, days), 0.0, 1.0)
+    return load_factors * capacity_mw * 0.25  # MWh per quarter-hour
+
+
 def simulated_prices(seed: int = 0, base: float = 80.0) -> np.ndarray:
     """Invent one day of power prices (GBP per MWh), slot by slot.
 

@@ -40,6 +40,7 @@ class PeriodResult:
 
 def run_period(
     seed: int = 0,
+    period: int = 72,
     book: str = "alice-wind",
     strategy: str = "da-bidder",
     position_limit: float = 500.0,
@@ -49,16 +50,18 @@ def run_period(
 ) -> PeriodResult:
     """Run Alice's bot for one delivery period against invented data.
 
-    `short_cost` and `long_cost` say how painful it is to sell too much
-    versus too little (see the sizing module). `position_limit` is the most
-    the safety gate will let her sell for this period.
+    `period` is which quarter-hour block of the day (0..95; the default 72 is
+    18:00). `short_cost` and `long_cost` say how painful it is to sell too much
+    versus too little (see the sizing module). `position_limit` is the most the
+    safety gate will let her sell for this period.
     """
     gate = governor or make_governor()
     gate.open_book(book, position_limit)
     gate.enable_strategy(strategy)
 
-    # 1. Forecast this period's output as a range, from recent readings.
-    recent_readings = data.simulated_generation(seed=seed)
+    # 1. Forecast this period's output as a range, from recent readings of the
+    #    same block on past days.
+    recent_readings = data.simulated_period_history(period, seed=seed)
     forecast = Forecaster().fit(recent_readings).predict()
 
     # 2. Decide how much to sell (a sale is a negative quantity).
@@ -69,7 +72,9 @@ def run_period(
     #    with real orders.
     pieces = 8
     per_piece = volume / pieces
-    price = float(np.mean(data.simulated_prices(seed=seed)))
+    if per_piece <= 0.0:
+        return PeriodResult(sold_mwh=0.0, admitted_orders=0, refused_orders=0)
+    price = float(data.simulated_prices(seed=seed)[period])
     admitted = refused = 0
     for i in range(pieces):
         order = Order(
@@ -104,8 +109,15 @@ class DayResult:
 def run_day(seed: int = 0, n_periods: int = data.PERIODS_PER_DAY) -> DayResult:
     """A whole day is just `run_period` run once for each block. Each block
     gets its own forecast and its own decision; this loop is the scaling
-    argument from Section 1 made concrete."""
-    results = [run_period(seed=seed * 1000 + i) for i in range(n_periods)]
+    argument from Section 1 made concrete.
+
+    Each delivery period is a separate tradable product, with its own book and
+    its own position limit, so the blocks do not share state (which is why each
+    gets its own book name below)."""
+    results = [
+        run_period(seed=seed, period=i, book=f"alice-wind-{i:02d}")
+        for i in range(n_periods)
+    ]
     return DayResult(
         periods=len(results),
         sold_mwh=sum(r.sold_mwh for r in results),
@@ -127,7 +139,10 @@ def settle(
 
 
 def compare_perfect_and_realistic(
-    seed: int = 0, short_cost: float = 90.0, long_cost: float = 60.0
+    seed: int = 0,
+    period: int = 72,
+    short_cost: float = 90.0,
+    long_cost: float = 60.0,
 ) -> dict[str, float]:
     """Run Alice's sizing decision for one period twice, and measure the cost
     of not being able to see the future. This is the experiment the capstone
@@ -140,12 +155,13 @@ def compare_perfect_and_realistic(
     nothing; the gap between the two is the price of uncertainty, and it is
     almost always larger than anything execution can win or lose.
     """
-    recent_readings = data.simulated_generation(seed=seed)
+    recent_readings = data.simulated_period_history(period, seed=seed)
     realistic = Forecaster().fit(recent_readings).predict()
 
-    # What actually turns up: one draw from the true distribution.
+    # What actually turns up: one draw from the true distribution, never
+    # below zero (a wind farm cannot produce negative power).
     rng = np.random.default_rng(seed + 1)
-    actual = float(rng.normal(realistic.mean, realistic.std))
+    actual = max(0.0, float(rng.normal(realistic.mean, realistic.std)))
 
     # Perfect foresight: a forecast centred exactly on the actual, no spread.
     perfect = ForecastDistribution(mean=actual, std=1e-9)
