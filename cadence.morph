@@ -1,0 +1,94 @@
+-- cadence: the governance layer of an automated power-trading bot,
+-- expressed as a Morpholog programme so the runtime - not the Python -
+-- enforces it. The trading code proposes one transformation, admit_order;
+-- the runtime decides. An order that breaches a position limit, or names a
+-- strategy whose kill switch is engaged, or lands on a halted book, is
+-- REFUSED. There is no path that admits an unlawful order, and an order
+-- cannot even be expressed without naming the strategy that produced it.
+--
+-- This is the companion programme to Section 8 of the guide
+-- "Algorithmic Trading in Power Markets". Regenerate the typed Python
+-- client the bot drives this through with:
+--
+--     morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+--
+-- Run against a DISPOSABLE PostgreSQL database (commits are real).
+
+program cadence
+
+-- A strategy authorised to place orders. The kill switch retracts this;
+-- once retracted, admit_order's gate refuses every order it names.
+predicate StrategyEnabled(strategy: Subject)
+
+-- A book open for trading. The circuit breaker / halt retracts this.
+predicate BookOpen(book: Subject)
+
+-- The position limit for a book: the maximum absolute net open quantity
+-- (MWh) the book may carry. The limit lives in the invariant below, so no
+-- path can leave the book over its cap.
+predicate PositionLimit(book: Subject, limit: Decimal)
+
+-- The governed order of record. Attribution is structural: an order
+-- cannot exist without naming the strategy that produced it and the book
+-- it belongs to. Signed quantity carries direction (buy positive, sell
+-- negative). Unique by order id, and append only - an admitted order is a
+-- fact on the record, never silently overwritten.
+predicate OrderAdmitted(order_id: Subject, strategy: Subject, book: Subject, signed_qty: Decimal, price: Decimal)
+    unique by (order_id)
+    append only
+
+intent OrderPlaced(order_id: Subject, strategy: Subject, book: Subject, signed_qty: Decimal, price: Decimal)
+intent StrategyKillSwitchEngaged(strategy: Subject)
+intent BookHalted(book: Subject)
+
+-- ---------------------------------------------------------------------
+-- Invariants: true for all admitted state, forever. The runtime refuses
+-- any commit that would break one.
+-- ---------------------------------------------------------------------
+
+-- A position limit is non-negative.
+invariant position_limit_non_negative:
+    PositionLimit(_, limit) implies 0 <= limit
+
+-- The net open position on a book never exceeds its limit, in either
+-- direction. Signed quantities sum to the net position; the cap binds
+-- both the long and the short side. This is the load-bearing rule: the
+-- runtime guarantees no admitted set of orders ever breaches the limit,
+-- by any path, so the trading code never has to track position state for
+-- the purpose of the limit check.
+invariant net_position_within_limit:
+    PositionLimit(book, limit) implies
+        (sum(q | OrderAdmitted(_, _, book, q, _)) <= limit
+         and (0 - limit) <= sum(q | OrderAdmitted(_, _, book, q, _)))
+
+-- ---------------------------------------------------------------------
+-- Transformations: the only ways state may change. A transformation
+-- proposes changes; the runtime applies them only if every invariant
+-- still holds once they are in place, and every gate passed when acted.
+-- ---------------------------------------------------------------------
+
+transformation enable_strategy(strategy):
+    admit StrategyEnabled(strategy)
+
+transformation engage_kill_switch(strategy):
+    require StrategyEnabled(strategy)
+    retract StrategyEnabled(strategy)
+    emit StrategyKillSwitchEngaged(strategy)
+
+transformation open_book(book, limit):
+    admit BookOpen(book)
+    admit PositionLimit(book, limit)
+
+transformation halt_book(book):
+    require BookOpen(book)
+    retract BookOpen(book)
+    emit BookHalted(book)
+
+-- Admit an order. The gate refuses it unless its strategy is enabled and
+-- the book is open (kill switch and circuit breaker, checked the instant
+-- the order is proposed). The net_position_within_limit invariant then
+-- refuses the commit if this order would carry the book over its cap.
+transformation admit_order(order_id, strategy, book, signed_qty, price):
+    require StrategyEnabled(strategy) and BookOpen(book)
+    admit OrderAdmitted(order_id, strategy, book, signed_qty, price)
+    emit OrderPlaced(order_id, strategy, book, signed_qty, price)

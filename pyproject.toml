@@ -1,0 +1,37 @@
+[project]
+name = "cadence"
+version = "0.1.0"
+description = "An automated power-trading bot, built component by component: distributional forecasting, sizing under uncertainty, deadline-aware execution, a signal-driven stat-arb bot, backtesting, and a governance layer. Companion project to the guide 'Algorithmic Trading in Power Markets'."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+authors = [{ name = "Jordan Dimov" }]
+# Pure-Python core depends only on numpy + pandas and runs with `uv sync`.
+# The governance layer (src/cadence/risk.py) can be backed by Morpholog
+# (github.com/jordan-dimov/morpholog), consumed as an external CLI binary
+# + PostgreSQL, NOT a pip dependency. Absent that, an in-process governor
+# with the same interface keeps the repo fully runnable. See README.
+dependencies = [
+    "numpy>=2",
+    "pandas>=3.0",
+]
+
+[dependency-groups]
+dev = ["pytest", "mypy", "ruff"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 88
+
+[tool.mypy]
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["pandas", "pandas.*", "numpy", "numpy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
