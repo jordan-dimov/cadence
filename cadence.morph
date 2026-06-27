@@ -69,14 +69,22 @@ intent BookHalted(book: Subject)
 invariant position_limit_non_negative:
     PositionLimit(_, limit) implies 0 <= limit
 
--- A book's total position must stay within its limit, whether it has built
--- up a big buy position or a big sell position. We add up the quantities of
--- all its orders (buys count positive, sells negative) and check the total
--- sits between minus-the-limit and plus-the-limit. This is the heart of it:
--- Morpholog guarantees no combination of orders can ever break the limit, so
--- the trading code never has to keep its own running tally to stay safe.
+-- A book's total position must stay within its limit, in either direction.
+-- We add up the quantities of all its orders (buys positive, sells negative)
+-- to get the net position, and check its size (its distance from zero, written
+-- abs(...)) never exceeds the limit. This is the heart of it: Morpholog
+-- guarantees no combination of orders can ever break the limit, so the trading
+-- code never has to keep its own running tally to stay safe.
 invariant net_position_within_limit:
-    PositionLimit(book, limit) implies ((0 - limit) <= sum(q | OrderAdmitted(_, _, book, q, _)) and sum(q | OrderAdmitted(_, _, book, q, _)) <= limit)
+    PositionLimit(book, limit) implies abs(sum(q | OrderAdmitted(_, _, book, q, _))) <= limit
+
+-- Basic order validity, enforced by the runtime rather than by the trading
+-- code: every recorded order has a real size and a positive price.
+invariant order_has_size:
+    OrderAdmitted(_, _, _, q, _) implies abs(q) > 0
+
+invariant order_price_positive:
+    OrderAdmitted(_, _, _, _, p) implies p > 0
 
 -- ---------------------------------------------------------------------
 -- The actions. These are the only ways anything can change. Each one is

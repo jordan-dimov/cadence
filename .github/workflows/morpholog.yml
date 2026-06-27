@@ -14,7 +14,7 @@ on:
 # will move this.
 env:
   MORPHOLOG_REPO: jordan-dimov/morpholog
-  MORPHOLOG_REF: 12832f1c0ae347f9c61e9f305e5fa226b89dca6a
+  MORPHOLOG_REF: 76d690f763d567dc998865c118174add6ebf61e0
 
 jobs:
   integration:
