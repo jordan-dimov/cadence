@@ -12,7 +12,7 @@
 -- Markets". The Python side talks to Morpholog through a small generated
 -- helper, created once with:
 --
---     morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+--     morpholog generate python-client cadence.morph --out src/cadence
 --
 -- Run it against a throwaway database, since the actions below are real and
 -- permanent.
@@ -27,15 +27,19 @@ program cadence
 
 -- This strategy is switched on and allowed to place orders. Switching it
 -- off (the "kill switch") removes this fact, and then its orders are refused.
+-- (A single-field fact is already a set, so it is naturally on-or-off: there
+-- is no such thing as "enabled twice".)
 predicate StrategyEnabled(strategy: Subject)
 
 -- This book is open for trading. Halting it (the "circuit breaker") removes
 -- this fact, and then nothing trades on it.
 predicate BookOpen(book: Subject)
 
--- The biggest position a book is allowed to build up (in MWh). The rule
--- that enforces this limit is written further down.
+-- The biggest position a book is allowed to build up (in MWh). One limit per
+-- book: the uniqueness stops two conflicting limits being set for the same
+-- book. The rule that enforces the limit is written further down.
 predicate PositionLimit(book: Subject, limit: Decimal)
+    unique by (book)
 
 -- A recorded order. Notice it must name the strategy and book it belongs
 -- to, so every order is traceable. The quantity is positive for a buy and

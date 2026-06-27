@@ -28,6 +28,7 @@ exposed. `FillReconciler` keeps the bot honest about what really happened.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 
@@ -76,36 +77,39 @@ def urgency_schedule(
 
 
 def liquidity_aware_clip(
-    remaining_qty: float, book: OrderBook, max_fraction: float = 0.5
+    remaining_qty: float,
+    book: OrderBook,
+    side: Literal["buy", "sell"],
+    max_fraction: float = 0.5,
 ) -> float:
     """Decide how big the next piece should be from how much is on offer now.
 
     When the book is deep we can trade a bigger piece; when it is thin we
     trade a smaller one, so we do not push the price against ourselves. We
     never take more than `max_fraction` of what is resting at the best price
-    level, nor more than what is left to trade. (This sizes a buy against the
-    best ask; selling works the same way against the best bid.)
+    level, nor more than what is left to trade. A buy looks at the best ask
+    (what sellers are offering); a sell looks at the best bid.
     """
     if remaining_qty < 0:
         raise ValueError("remaining_qty cannot be negative")
-    depth_at_best = float(book.ask_sizes[0])
-    return min(remaining_qty, max_fraction * depth_at_best)
+    depth_at_best = book.ask_sizes[0] if side == "buy" else book.bid_sizes[0]
+    return min(remaining_qty, max_fraction * float(depth_at_best))
 
 
 def cost_of_waiting(
-    fill_prob_at_close: float, expected_imbalance_price: float
+    prob_unfilled_at_gate: float, expected_imbalance_price: float
 ) -> float:
     """How much it costs, on average, to leave trading too late.
 
     If there is some chance you fail to finish before the gate closes, that
     leftover gets settled in the expensive imbalance market. The expected
-    cost is simply: the chance you are caught out, times how much being
-    caught out costs. This is the number that justifies trading more urgently
-    in power than you would in, say, shares.
+    cost is simply: the chance you are still unfilled at the gate, times how
+    much being caught out costs. This is the number that justifies trading
+    more urgently in power than you would in, say, shares.
     """
-    if not 0.0 <= fill_prob_at_close <= 1.0:
+    if not 0.0 <= prob_unfilled_at_gate <= 1.0:
         raise ValueError("a probability must be between 0 and 1")
-    return fill_prob_at_close * expected_imbalance_price
+    return prob_unfilled_at_gate * expected_imbalance_price
 
 
 @dataclass
@@ -126,6 +130,8 @@ class FillReconciler:
         """Record that `qty` of the order just got filled."""
         if qty < 0:
             raise ValueError("a fill cannot be negative")
+        if qty > self.residual + 1e-9:
+            raise ValueError("fill exceeds the quantity still outstanding")
         self.filled += qty
         self.fills.append(qty)
 

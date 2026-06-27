@@ -58,7 +58,10 @@ def simulated_prices(seed: int = 0, base: float = 80.0) -> np.ndarray:
     rng = _rng(seed)
     slot = np.arange(PERIODS_PER_DAY)
     hour = slot / 4.0
-    evening_peak = -18 * np.cos((hour - 19) / 24 * 2 * np.pi)
+    # A bump up in the early evening (demand peak), a dip down around midday
+    # (solar floods the grid). Both are shaped so the effect fades away from
+    # its hour, which reads more intuitively than a single sine wave.
+    evening_peak = 18 * np.exp(-((hour - 19) ** 2) / 10)
     midday_solar_dip = -22 * np.exp(-((hour - 13) ** 2) / 8)
     noise = rng.normal(0, 4, PERIODS_PER_DAY)
     return base + evening_peak + midday_solar_dip + noise

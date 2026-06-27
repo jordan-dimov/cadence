@@ -122,6 +122,11 @@ def walk_forward(
     into `n_folds` successive pieces and backtests each in turn, so you get
     many out-of-sample scores and only ever judge a piece on its own stretch
     of time, the way live trading only ever knows the past.
+
+    Note this is the simple version: it only answers "was performance stable
+    across time?". It does not re-tune the strategy on each window (full
+    walk-forward optimisation), which is safe here only because this z-score
+    signal already looks at nothing but the past.
     """
     if n_folds < 1:
         raise ValueError("n_folds must be at least 1")

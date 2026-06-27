@@ -46,6 +46,19 @@ uv run pytest -q
 That is it. Everything runs on invented data, so there is no exchange to
 connect to and no database to set up.
 
+## Try it
+
+The `examples/` folder has five short scripts that print plain output, one per
+idea, so you can watch each piece work:
+
+```bash
+uv run python examples/01_market_data.py   # invent a day of prices and wind
+uv run python examples/02_alice_sizing.py  # how much to sell, and why less than the forecast
+uv run python examples/03_execution.py     # work an order in pieces
+uv run python examples/04_dan_backtest.py  # a signal, backtested honestly with costs
+uv run python examples/05_risk_gate.py     # what the safety gate lets through
+```
+
 ## The safety gate, and Morpholog
 
 `risk.py` is the gate every order passes before it is sent. It stops the bot

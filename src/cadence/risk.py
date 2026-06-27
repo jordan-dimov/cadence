@@ -243,6 +243,11 @@ def make_governor(kind: str | None = None) -> Governor:
     Morpholog-backed one instead.
     """
     kind = kind or os.environ.get("CADENCE_GOVERNOR", "inprocess")
+    if kind == "inprocess":
+        return InProcessGovernor()
     if kind == "morpholog":
         return MorphologGovernor()
-    return InProcessGovernor()
+    # A typo should not silently fall back to the weaker gate.
+    raise ValueError(
+        f"unknown governor kind {kind!r} (use 'inprocess' or 'morpholog')"
+    )
