@@ -45,6 +45,13 @@ predicate OrderAdmitted(order_id: Subject, strategy: Subject, book: Subject, sig
     unique by (order_id)
     append only
 
+-- Each book's current net position, worked out by Morpholog from the orders
+-- themselves (the calculation is at the bottom of the file). The bot does
+-- not keep its own running tally and hope it stays correct: it just asks
+-- Morpholog. This is a "derived" fact, a fact computed from other facts and
+-- kept in step automatically; read it with `morpholog inspect derived`.
+predicate NetPosition(book: Subject, qty: Decimal)
+
 intent OrderPlaced(order_id: Subject, strategy: Subject, book: Subject, signed_qty: Decimal, price: Decimal)
 intent StrategyKillSwitchEngaged(strategy: Subject)
 intent BookHalted(book: Subject)
@@ -94,7 +101,20 @@ transformation halt_book(book):
 -- Place an order. It is refused straight away unless its strategy is
 -- switched on and its book is open. Then the position rule above refuses it
 -- as well if this order would push the book past its limit.
+--
+-- To ask "would this order be allowed?" without actually placing it, use
+-- `morpholog explain` instead of `morpholog propose`: it checks the order
+-- against the live state and tells you yes, or which rule would say no, with
+-- nothing recorded. That is the pre-trade check the execution loop wants.
 transformation admit_order(order_id, strategy, book, signed_qty, price):
     require StrategyEnabled(strategy) and BookOpen(book)
     admit OrderAdmitted(order_id, strategy, book, signed_qty, price)
     emit OrderPlaced(order_id, strategy, book, signed_qty, price)
+
+-- The calculation behind NetPosition near the top: for every book that has a
+-- limit, add up the quantities of all its orders (buys positive, sells
+-- negative). Because Morpholog keeps this in step automatically, the trading
+-- code can read its live position from here and never needs its own counter.
+derived NetPosition(book):
+    over PositionLimit(book, _)
+    value qty = sum(q | OrderAdmitted(_, _, book, q, _))

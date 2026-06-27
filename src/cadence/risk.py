@@ -162,6 +162,24 @@ class MorphologGovernor:
 
         morpholog generate python-client cadence.morph --out src/cadence/_morph_client
 
+    A few things this version gets for free, which the plain one above cannot:
+
+      - To ask "would this order be allowed?" without placing it, the gate
+        uses `morpholog explain` rather than `morpholog propose`: same check,
+        nothing recorded. That is the pre-trade dry run.
+      - To read the live position, the gate reads the NetPosition figure
+        Morpholog keeps up to date (see cadence.morph), instead of holding
+        its own counter that could drift out of step.
+      - To admit a burst of orders in one go (an auction, a batch of slices),
+        it uses `morpholog propose --batch` rather than one call per order.
+
+    Morpholog keeps its record in a real (PostgreSQL) database on purpose:
+    that durable, tamper-evident store is the whole reason it can survive a
+    restart and be replayed later, which an in-memory version would throw
+    away. The cost is that it runs as a separate program. For heavier use a
+    resident `morpholog serve` process avoids paying that start-up cost on
+    every call; that is the production shape, walked through in Section 8.
+
     The methods are left for the guide's Section 8 to fill in, so that the
     examples here keep running with nothing extra installed. The point the
     guide makes is that almost none of the rule-checking ends up in Python
