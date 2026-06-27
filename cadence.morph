@@ -72,9 +72,7 @@ invariant position_limit_non_negative:
 -- Morpholog guarantees no combination of orders can ever break the limit, so
 -- the trading code never has to keep its own running tally to stay safe.
 invariant net_position_within_limit:
-    PositionLimit(book, limit) implies
-        (sum(q | OrderAdmitted(_, _, book, q, _)) <= limit
-         and (0 - limit) <= sum(q | OrderAdmitted(_, _, book, q, _)))
+    PositionLimit(book, limit) implies ((0 - limit) <= sum(q | OrderAdmitted(_, _, book, q, _)) and sum(q | OrderAdmitted(_, _, book, q, _)) <= limit)
 
 -- ---------------------------------------------------------------------
 -- The actions. These are the only ways anything can change. Each one is

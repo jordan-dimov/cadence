@@ -104,13 +104,22 @@ guide; the cadence-specific parts are:
 3. The typed client, generated from this project's rules:
 
    ```bash
-   morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+   morpholog generate python-client cadence.morph --out src/cadence
    ```
 
-Then select the Morpholog-backed gate with `CADENCE_GOVERNOR=morpholog`.
-Wiring the governor's methods onto the generated client is the exercise of
-the guide's Section 8; the in-process gate stays the default, so the rest of
-the project always runs with nothing extra installed.
+Then select the Morpholog-backed gate with `CADENCE_GOVERNOR=morpholog`, or
+point `pytest` at the integration test with `MORPHOLOG_BIN` set:
+
+```bash
+export DATABASE_URL=postgres:///cadence_demo
+export MORPHOLOG_BIN=/path/to/morpholog   # or put `morpholog` on PATH
+uv run pytest tests/test_morpholog_governor.py
+```
+
+The in-process gate stays the default, so the everyday `uv run pytest` (and a
+fresh checkout) needs none of this; the Morpholog integration test skips
+unless the database and binary are present. Continuous integration provides
+both and runs it on every push (`.github/workflows/morpholog.yml`).
 
 ## Status
 

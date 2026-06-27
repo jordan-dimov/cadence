@@ -1,0 +1,68 @@
+name: morpholog
+
+# The Morpholog integration leg: build the pinned Morpholog from source,
+# generate this project's client from cadence.morph, and run the governor
+# against a real PostgreSQL database. Kept separate from ci.yml so the fast
+# pure-Python suite is never blocked on a Rust build.
+
+on:
+  push:
+  pull_request:
+
+# Pin the Morpholog commit this integration runs against. Re-pin in the same
+# PR that adapts to a Morpholog change; the work-in-progress Morpholog PRs
+# will move this.
+env:
+  MORPHOLOG_REPO: jordan-dimov/morpholog
+  MORPHOLOG_REF: 12832f1c0ae347f9c61e9f305e5fa226b89dca6a
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cadence_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cadence_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Check out Morpholog
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MORPHOLOG_REPO }}
+          ref: ${{ env.MORPHOLOG_REF }}
+          path: morpholog
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: morpholog
+      - name: Build the morpholog CLI
+        run: cargo build -p morpholog-cli --manifest-path morpholog/Cargo.toml
+
+      - name: Generate the Morpholog client
+        run: ./morpholog/target/debug/morpholog generate python-client cadence.morph --out src/cadence
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run the Morpholog integration tests
+        env:
+          MORPHOLOG_BIN: ${{ github.workspace }}/morpholog/target/debug/morpholog
+        run: uv run pytest -q tests/test_morpholog_governor.py

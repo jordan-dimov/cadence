@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Protocol
 
 
@@ -155,62 +156,83 @@ class MorphologGovernor:
     or auditor can read them without reading any Python. Morpholog will not
     record an order that breaks them, no matter how the order arrives. Setting
     it up needs the `morpholog` program, a throwaway database, and a one-off
-    step to generate the typed client:
+    step to generate the typed client (see the README):
 
-        morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+        morpholog generate python-client cadence.morph --out src/cadence
 
-    Three things this version gets for free that the plain one cannot:
-
-      - A pre-trade dry run: `morpholog explain` answers "would this order be
-        allowed?" without recording anything.
-      - A live position to read straight from the governed record (the
-        NetPosition figure in cadence.morph), instead of its own counter that
-        could drift out of step.
-      - Bursts in one call: `morpholog propose --batch` for an auction or a
-        batch of slices.
+    Each method below maps onto one transformation in cadence.morph. An order
+    that would breach the position limit, name a switched-off strategy, or land
+    on a halted book comes back as a refusal (a `Rejected` outcome), so the
+    runtime, not this Python, is what enforces the rules.
 
     The PostgreSQL database is deliberate: it gives the record a real, durable
     home that survives a restart. Morpholog then builds its tamper-evidence on
     top (an append-only, hash-chained audit it can replay and verify); the
     database supplies durability, Morpholog supplies the tamper-evidence. The
     cost is running as a separate program; a resident `morpholog serve`
-    process avoids paying the start-up cost per call. The methods below are
-    filled in during the guide's Section 8, so the examples here keep running
-    with nothing extra installed.
+    process avoids paying the start-up cost per call.
     """
 
-    def __init__(self, database_url: str | None = None) -> None:
+    ACTOR = "cadence-bot"
+
+    def __init__(
+        self, database_url: str | None = None, morph_file: str = "cadence.morph"
+    ) -> None:
         self._database_url = database_url or os.environ.get("DATABASE_URL")
+        if not self._database_url:
+            raise MorphologUnavailable(
+                "set DATABASE_URL to a PostgreSQL database first"
+            )
         try:
-            # This client only exists after the "generate" step above.
-            from cadence._morph_client import Morpholog  # type: ignore
+            # This package only exists after the "generate" step above.
+            from cadence.morpholog_client import Morpholog, models
         except ImportError as exc:  # pragma: no cover - needs external setup
             raise MorphologUnavailable(
                 "Morpholog client not generated yet. Run: "
-                "morpholog generate python-client cadence.morph "
-                "--out src/cadence/_morph_client"
+                "morpholog generate python-client cadence.morph --out src/cadence"
             ) from exc
-        if not self._database_url:
-            raise MorphologUnavailable(
-                "set DATABASE_URL to a throwaway database first"
+        self._models = models
+        self._client = Morpholog(morph_file, self._database_url)
+        # Provision the schema for this programme (idempotent).
+        self._client.init(skip_if_exists=True)
+
+    def _submit(self, request: object) -> Decision:
+        """Propose one transformation; map the outcome onto a Decision."""
+        from cadence.morpholog_client import envelopes
+
+        outcome = self._client.submit(request, self.ACTOR)
+        if isinstance(outcome, envelopes.Committed):
+            return Decision(True)
+        return Decision(False, outcome.reason)
+
+    def open_book(self, book: str, limit: float) -> None:
+        decision = self._submit(
+            self._models.OpenBookRequest(book=book, limit=Decimal(str(limit)))
+        )
+        if not decision.admitted:
+            raise ValueError(f"open_book refused: {decision.reason}")
+
+    def enable_strategy(self, strategy: str) -> None:
+        self._submit(self._models.EnableStrategyRequest(strategy=strategy))
+
+    def engage_kill_switch(self, strategy: str) -> None:
+        # Best effort: a kill switch on an already-off strategy is a no-op.
+        self._submit(self._models.EngageKillSwitchRequest(strategy=strategy))
+
+    def halt_book(self, book: str) -> None:
+        # Best effort: halting an already-halted book is a no-op.
+        self._submit(self._models.HaltBookRequest(book=book))
+
+    def admit(self, order: Order) -> Decision:
+        return self._submit(
+            self._models.AdmitOrderRequest(
+                order_id=order.order_id,
+                strategy=order.strategy,
+                book=order.book,
+                signed_qty=Decimal(str(order.signed_qty)),
+                price=Decimal(str(order.price)),
             )
-        self._client = Morpholog("cadence.morph", self._database_url)
-
-    # Each method below matches one rule-changing action in cadence.morph.
-    def open_book(self, book: str, limit: float) -> None:  # pragma: no cover
-        raise NotImplementedError("filled in during guide Section 8")
-
-    def enable_strategy(self, strategy: str) -> None:  # pragma: no cover
-        raise NotImplementedError("filled in during guide Section 8")
-
-    def engage_kill_switch(self, strategy: str) -> None:  # pragma: no cover
-        raise NotImplementedError("filled in during guide Section 8")
-
-    def halt_book(self, book: str) -> None:  # pragma: no cover
-        raise NotImplementedError("filled in during guide Section 8")
-
-    def admit(self, order: Order) -> Decision:  # pragma: no cover
-        raise NotImplementedError("filled in during guide Section 8")
+        )
 
 
 def make_governor(kind: str | None = None) -> Governor:

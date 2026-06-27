@@ -25,12 +25,19 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 88
+# The Morpholog client is generated code; do not lint it.
+extend-exclude = ["src/cadence/morpholog_client"]
 
 [tool.mypy]
 files = ["src"]
+# The Morpholog client is generated code; do not type-check it.
+exclude = ["src/cadence/morpholog_client/"]
 
 [[tool.mypy.overrides]]
-module = ["pandas", "pandas.*", "numpy", "numpy.*"]
+module = [
+    "pandas", "pandas.*", "numpy", "numpy.*",
+    "cadence.morpholog_client", "cadence.morpholog_client.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
