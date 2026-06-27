@@ -6,7 +6,7 @@ it needs the Morpholog program and a database set up separately.
 import numpy as np
 
 from cadence import data
-from cadence.backtest import backtest_signal
+from cadence.backtest import backtest_signal, walk_forward
 from cadence.execution import (
     FillReconciler,
     cost_of_waiting,
@@ -15,7 +15,7 @@ from cadence.execution import (
     urgency_schedule,
 )
 from cadence.forecast import ForecastDistribution, Forecaster
-from cadence.pipeline import run_day
+from cadence.pipeline import compare_perfect_and_realistic, run_day
 from cadence.risk import InProcessGovernor, Order
 from cadence.signals import rolling_zscore, zscore_signals
 from cadence.sizing import optimal_volume
@@ -72,13 +72,31 @@ def test_signals_no_lookahead():
     assert set(np.unique(sig)).issubset({-1, 0, 1})
 
 
-def test_backtest_charges_costs():
+def test_backtest_charges_costs_and_impact():
     gap = data.simulated_country_gap(days=60, seed=4)
     sig = zscore_signals(gap, window=14 * 24, threshold=2.0)
     free = backtest_signal(gap, sig, cost_per_trade=0.0)
     costed = backtest_signal(gap, sig, cost_per_trade=1.0)
+    impacted = backtest_signal(gap, sig, cost_per_trade=1.0, impact=0.5)
     assert costed.pnl <= free.pnl  # honest costs never improve P&L
+    assert impacted.pnl <= costed.pnl  # market impact only makes it worse
     assert costed.n_trades >= 0
+
+
+def test_walk_forward_gives_many_scores():
+    gap = data.simulated_country_gap(days=60, seed=4)
+    sig = zscore_signals(gap, window=14 * 24, threshold=2.0)
+    folds = walk_forward(gap, sig, n_folds=4)
+    assert len(folds) == 4  # one out-of-sample score per chunk
+
+
+def test_perfect_foresight_costs_less_than_realistic():
+    r = compare_perfect_and_realistic(seed=7)
+    # Perfect foresight sells the right amount, so its penalty is ~zero and
+    # never more than the realistic one. The gap is the cost of uncertainty.
+    assert r["penalty_perfect"] <= r["penalty_realistic"] + 1e-9
+    assert r["penalty_perfect"] < 1e-3
+    assert r["cost_of_not_knowing"] >= -1e-9
 
 
 def test_governor_enforces_rules():

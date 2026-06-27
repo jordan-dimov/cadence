@@ -4,7 +4,8 @@ Before risking real money, you replay a strategy over past data and see how
 it would have done. That is a backtest. It sounds simple, and it is full of
 traps that make a losing strategy look like a winner.
 
-The two biggest traps:
+Three traps turn a losing strategy into an apparent winner, and this module
+guards against each:
 
   - Peeking at the future. If your strategy ever uses information it could not
     have known at the time, even by accident, the backtest is a fantasy. We
@@ -13,12 +14,14 @@ The two biggest traps:
   - Pretending trading is free. Every trade costs something (fees, and the
     small loss from crossing the gap between buy and sell prices). Ignore
     that and any strategy looks better than it really is. We charge a cost
-    for every trade, and you can watch the apparent profit shrink once you
-    do.
+    for every trade, and you can watch the apparent profit shrink once you do.
+  - Assuming you fill at the price on the screen. A big order moves the price
+    against you, so `impact` adds a cost that grows with the size of the
+    trade, not just the number of trades.
 
-The full guide adds more (modelling how your own trading moves the price, and
-testing on rolling chunks of time). This module is the honest core: replay,
-charge costs, and report not just profit but how bumpy the ride was.
+And it tests honestly: `walk_forward` scores the strategy on several
+successive out-of-sample chunks rather than one split, the way live trading
+only ever knows the past.
 """
 
 from __future__ import annotations
@@ -52,12 +55,16 @@ def backtest_signal(
     gap: np.ndarray,
     signals: np.ndarray,
     cost_per_trade: float = 0.5,
+    impact: float = 0.0,
 ) -> BacktestResult:
     """Replay a buy/sell/do-nothing strategy over past data and score it.
 
     `gap` is the price gap over time; `signals` is what the strategy decided
-    at each step (+1 buy, -1 sell, 0 nothing). `cost_per_trade` is what we
-    charge, per unit, each time the position changes.
+    at each step (+1 buy, -1 sell, 0 nothing). `cost_per_trade` is the flat
+    cost per unit each time the position changes (fees plus half the bid-ask
+    gap). `impact` adds market impact: a cost that grows with the *square* of
+    the trade size, because a bigger order pushes the price further against
+    you. Set it above zero and watch a busy strategy's apparent edge shrink.
 
     The important detail: we hold *yesterday's* decision into *today's* price
     move. That one-step delay is what stops the strategy from cheating by
@@ -70,9 +77,10 @@ def backtest_signal(
     todays_move = np.diff(gap, prepend=gap[0])
     profit_before_costs = position * todays_move
 
-    # Charge a cost every time we change our position.
+    # Charge each time the position changes: a flat cost, plus a market-impact
+    # term that grows with the size of the change (a bigger trade hurts more).
     position_changes = np.abs(np.diff(position, prepend=0))
-    costs = position_changes * cost_per_trade
+    costs = position_changes * cost_per_trade + position_changes**2 * impact
     profit_after_costs = profit_before_costs - costs
 
     # Track the running total to find the worst dip along the way.
@@ -97,3 +105,33 @@ def backtest_signal(
         max_drawdown=float(dip_from_peak.min()),
         per_step_pnl=profit_after_costs,
     )
+
+
+def walk_forward(
+    gap: np.ndarray,
+    signals: np.ndarray,
+    n_folds: int = 4,
+    cost_per_trade: float = 0.5,
+    impact: float = 0.0,
+) -> list[BacktestResult]:
+    """Score the strategy on several successive out-of-sample chunks, instead
+    of one split.
+
+    A single train/test split gives you one number, and it is chosen knowing
+    how the whole history played out. Walk-forward instead cuts the history
+    into `n_folds` successive pieces and backtests each in turn, so you get
+    many out-of-sample scores and only ever judge a piece on its own stretch
+    of time, the way live trading only ever knows the past.
+    """
+    if n_folds < 1:
+        raise ValueError("n_folds must be at least 1")
+    fold = gap.size // n_folds
+    if fold == 0:
+        raise ValueError("not enough data for that many folds")
+    results = []
+    for k in range(n_folds):
+        chunk = slice(k * fold, (k + 1) * fold)
+        results.append(
+            backtest_signal(gap[chunk], signals[chunk], cost_per_trade, impact)
+        )
+    return results
