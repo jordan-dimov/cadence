@@ -65,11 +65,14 @@ def urgency_schedule(
         raise ValueError("n_slices must be positive")
     if alpha <= 0:
         raise ValueError("alpha must be positive")
-    # How much time is left, as a fraction, falling from 1 toward 0.
-    time_left = np.linspace(1.0, 1.0 / n_slices, n_slices)
-    weights = time_left**alpha
-    weights = weights / weights.sum()
-    return weights * total_qty
+    # The fraction of the order finished by the end of each slice follows a
+    # power curve: alpha below 1 bends it early (front-loaded), alpha of 1 is
+    # a straight line (equal pieces), alpha above 1 bends it late
+    # (back-loaded). The per-slice amounts are the steps of that curve, and
+    # they always sum to the full amount.
+    slice_end = np.arange(1, n_slices + 1) / n_slices
+    done_by_slice = slice_end**alpha
+    return np.diff(done_by_slice, prepend=0.0) * total_qty
 
 
 def liquidity_aware_clip(

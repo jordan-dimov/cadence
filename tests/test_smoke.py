@@ -14,7 +14,7 @@ from cadence.execution import (
     twap_schedule,
     urgency_schedule,
 )
-from cadence.forecast import ForecastDistribution, PriceForecaster
+from cadence.forecast import ForecastDistribution, Forecaster
 from cadence.pipeline import run_day
 from cadence.risk import InProcessGovernor, Order
 from cadence.signals import rolling_zscore, zscore_signals
@@ -29,7 +29,7 @@ def test_data_shapes():
 
 
 def test_forecast_returns_distribution():
-    dist = PriceForecaster().fit(data.simulated_generation(seed=2)).predict()
+    dist = Forecaster().fit(data.simulated_generation(seed=2)).predict()
     assert isinstance(dist, ForecastDistribution)
     assert dist.quantile(0.9) > dist.quantile(0.1)
 
@@ -45,9 +45,12 @@ def test_sizing_asymmetry():
 def test_execution_schedulers_and_reconciliation():
     assert np.isclose(twap_schedule(100, 4).sum(), 100)
     assert np.isclose(urgency_schedule(100, 4, alpha=0.5).sum(), 100)
-    # Front-loaded puts more in the first clip than the last.
-    front = urgency_schedule(100, 4, alpha=0.5)
-    assert front[0] > front[-1]
+    # alpha = 1 reproduces the even (TWAP) schedule.
+    assert np.allclose(urgency_schedule(100, 4, alpha=1.0), twap_schedule(100, 4))
+    # alpha < 1 front-loads (more in the first clip than the last);
+    # alpha > 1 back-loads (more in the last clip than the first).
+    assert urgency_schedule(100, 4, alpha=0.5)[0] > urgency_schedule(100, 4, 0.5)[-1]
+    assert urgency_schedule(100, 4, alpha=2.0)[0] < urgency_schedule(100, 4, 2.0)[-1]
     assert cost_of_waiting(0.5, 200) == 100.0
 
     # A clip is capped by what is on offer at the best level.

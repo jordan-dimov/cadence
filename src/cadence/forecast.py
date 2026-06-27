@@ -58,7 +58,7 @@ class ForecastDistribution:
         return NormalDist(self.mean, self.std).inv_cdf(q)
 
 
-class PriceForecaster:
+class Forecaster:
     """A deliberately simple forecaster: look at what happened in the past,
     and assume the future looks similar.
 
@@ -72,7 +72,7 @@ class PriceForecaster:
         self._mean: float | None = None
         self._std: float | None = None
 
-    def fit(self, history: np.ndarray) -> "PriceForecaster":
+    def fit(self, history: np.ndarray) -> "Forecaster":
         """Learn from past values: their average, and how much they varied."""
         if history.size == 0:
             raise ValueError("cannot learn from an empty history")

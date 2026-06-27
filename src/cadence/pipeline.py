@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import data
-from .forecast import PriceForecaster
+from .forecast import Forecaster
 from .risk import Governor, Order, make_governor
 from .sizing import optimal_volume
 
@@ -56,7 +56,7 @@ def run_day(
 
     # 1. Guess the day's wind output as a range of possibilities.
     past_output = data.simulated_generation(seed=seed)
-    forecast = PriceForecaster().fit(past_output).predict()
+    forecast = Forecaster().fit(past_output).predict()
 
     # 2. Decide how much to sell (a sale is a negative quantity).
     volume = optimal_volume(forecast, short_cost=short_cost, long_cost=long_cost)
