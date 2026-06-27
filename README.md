@@ -79,8 +79,38 @@ those three ways to show where Morpholog earns its keep. The rules
 themselves live in plain sight in [`cadence.morph`](./cadence.morph), readable
 without knowing any Python.
 
-To use the Morpholog version you need the `morpholog` program, a throwaway
-database, and a one-off setup step; the guide's Section 8 walks through it.
+### Running the Morpholog governor locally
+
+The Morpholog version is the production shape, and it runs locally (and in
+continuous integration, the way Glasshouse already does) in three light
+steps. For installation details and a fuller tour, see the official
+[Morpholog repo](https://github.com/jordan-dimov/morpholog) and its developer
+guide; the cadence-specific parts are:
+
+1. A throwaway PostgreSQL database:
+
+   ```bash
+   createdb cadence_demo
+   export DATABASE_URL=postgres:///cadence_demo
+   ```
+
+2. The `morpholog` command-line tool, installed from a Morpholog checkout
+   (see its developer guide):
+
+   ```bash
+   cargo install --path crates/morpholog-cli
+   ```
+
+3. The typed client, generated from this project's rules:
+
+   ```bash
+   morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+   ```
+
+Then select the Morpholog-backed gate with `CADENCE_GOVERNOR=morpholog`.
+Wiring the governor's methods onto the generated client is the exercise of
+the guide's Section 8; the in-process gate stays the default, so the rest of
+the project always runs with nothing extra installed.
 
 ## Status
 
