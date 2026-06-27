@@ -1,6 +1,6 @@
-"""Smoke tests: every module's runnable core works on simulated data, with
-no exchange or database. The Morpholog-backed path is exercised in a
-separate, skipped-by-default integration test (it needs the binary + PG).
+"""Quick checks that every piece runs on the invented data, with nothing
+extra installed. The Morpholog-backed safety gate is not tested here because
+it needs the Morpholog program and a database set up separately.
 """
 
 import numpy as np

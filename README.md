@@ -1,78 +1,88 @@
 # cadence
 
-An automated power-trading bot, built component by component on simulated
-European power-market data. This is the companion project to the guide
-**Algorithmic Trading in Power Markets** (Practitioner Track, Energy
-Trading & ETRM Skills). Each module is one section of the guide; together
-they assemble the two archetypes of automated trading the guide teaches.
+A small, readable, automated power-trading bot you can run on your own
+laptop. It is the companion code for the guide **Algorithmic Trading in
+Power Markets** (Practitioner Track, Energy Trading & ETRM Skills). The code
+is built one piece at a time, and each piece matches one section of the
+guide.
 
-The name is the theme: automated trading is a problem of *timing* - working
-orders into a continuous market on a beat, the control loop running each
-tick, every decision racing a gate closure.
+The name says what the job really is. Automated trading is mostly about
+*timing*: feeding orders into a market that never stops, one beat at a time,
+always racing a cut-off.
 
-## The control loop
+## What it builds
 
-```text
-market data  ->  forecast  ->  signal  ->  sizing decision  ->  pre-trade gate
-   ->  execution  ->  fills  ->  position / P&L state  ->  monitoring  (loop)
-```
+Two simple bots, on purpose, because they are two different kinds of trading:
 
-| Module | Guide section | What it does |
+- **Alice's bot.** Alice owns a wind farm and has to sell its power. Her bot
+  guesses how much the wind will make, decides how much to sell, and places
+  the orders.
+- **Dan's bot.** Dan owns nothing. He just watches the price gap between two
+  countries and bets when it looks unusual, sitting still the rest of the
+  time.
+
+## The pieces
+
+| File | Guide section | What it does, in one line |
 |---|---|---|
-| `data` | 2 | Seeded simulated generation, prices, order books, cross-border spread |
-| `forecast` | 3 | A *distributional* forecaster (not a point: sizing needs the spread) |
-| `sizing` | 4 | Newsvendor-optimal bid volume under asymmetric imbalance cost |
-| `execution` | 5 | TWAP / urgency / liquidity schedulers, fill reconciliation |
-| `signals` | 6 | Cross-border Z-score stat-arb (Dan, the pure-financial bot) |
-| `backtest` | 7 | Cost-aware backtest with risk-adjusted metrics, no look-ahead |
-| `risk` | 8 | The governance gate: position limit, kill switch, attribution |
-| `pipeline` | 9 | The capstone forecast-to-trade run (Alice, the asset-backed bot) |
+| `data` | 2 | Invents realistic market data so the examples run anywhere |
+| `forecast` | 3 | Guesses a future number as a *range*, not a single value |
+| `sizing` | 4 | Decides how much to sell, leaning to the safe side |
+| `execution` | 5 | Places orders in small pieces so as not to move the price |
+| `signals` | 6 | Spots a tradeable price gap between two countries |
+| `backtest` | 7 | Honestly checks whether a strategy would have made money |
+| `risk` | 8 | The safety gate every order must pass before it is sent |
+| `pipeline` | 9 | The finale: every piece working together as one bot |
 
-Two archetypes, contrasted on purpose: **Alice** is asset-backed and
-forecast-driven (she must trade her wind); **Dan** is pure-financial and
-signal-driven (he chooses his exposure and can sit flat).
+## Running it
 
-## Quickstart
-
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.14+.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.14 or newer.
 
 ```bash
 uv sync --dev
 uv run pytest -q
 ```
 
-Everything runs on simulated data with no exchange or database access.
+That is it. Everything runs on invented data, so there is no exchange to
+connect to and no database to set up.
 
-## The governance layer and Morpholog
+## The safety gate, and Morpholog
 
-`risk.py` is the pre-trade gate every order passes before it reaches the
-exchange. It enforces what 2026 regulation now requires (REMIT II
-order-and-trade logging; ACER per-transaction algo data from 29 October
-2027; MiFID II-style kill switches and pre-trade risk controls): a position
-limit, a kill switch per strategy, a circuit breaker per book, and
-structural attribution so every order is traceable to the strategy that
-produced it.
+`risk.py` is the gate every order passes before it is sent. It stops the bot
+building too big a position, lets you switch a strategy off instantly, lets
+you halt a whole book, and makes sure every order says which strategy created
+it (something regulators increasingly require).
 
-It ships with two interchangeable governors:
+It comes in two interchangeable versions, and comparing them is the real
+lesson of that section:
 
-- **`InProcessGovernor`** (default): pure Python, the same rules, runnable
-  with no infrastructure.
-- **`MorphologGovernor`**: drives the [Morpholog](https://github.com/jordan-dimov/morpholog)
-  runtime over [`cadence.morph`](./cadence.morph). The position limit lives
-  in a runtime *invariant*, so an order that would breach it is **refused
-  by the runtime and cannot be committed** - by any path, not just the one
-  the bot remembered to check. The order-of-record is tamper-evident and
-  replayable to any prior instant. This is "audit-grade by construction":
-  the guarantee is the runtime's, not a logging convention the trading code
-  has to be trusted to honour.
+- **The plain-Python version** holds everything in memory. It needs nothing
+  extra and is what the examples use by default.
+- **The Morpholog version** hands the rules to
+  [Morpholog](https://github.com/jordan-dimov/morpholog), a separate engine
+  that stores the record properly and simply refuses to record an order that
+  breaks a rule, no matter how that order arrives.
 
-Select the runtime-backed governor with `CADENCE_GOVERNOR=morpholog` (needs
-the `morpholog` binary, a disposable PostgreSQL database, and the generated
-client: `morpholog generate python-client cadence.morph --out
-src/cadence/_morph_client`). Section 8 of the guide walks the wiring.
+On a small single-program demo like this, the plain version is all you need,
+and Morpholog can look like more than the job requires. Its value shows up
+when the demo grows up:
+
+- the program restarts and must not forget what it already owns;
+- several bots trade the same book at once and must share one honest view of
+  the position;
+- an auditor needs a record that provably has not been altered and can be
+  wound back to any moment in the past.
+
+Those are the things that turn a few dozen lines of Python into thousands.
+The guide builds the plain version first, then deliberately breaks it in
+those three ways to show where Morpholog earns its keep. The rules
+themselves live in plain sight in [`cadence.morph`](./cadence.morph), readable
+without knowing any Python.
+
+To use the Morpholog version you need the `morpholog` program, a throwaway
+database, and a one-off setup step; the guide's Section 8 walks through it.
 
 ## Status
 
-Scaffold. Each module has a runnable core; the guide fills in the depth
-(market-impact modelling, walk-forward validation, the intraday adjustment
-loop, the full Morpholog wiring) section by section.
+This is a scaffold. Every piece has a small working core so the whole thing
+runs today; the guide fills in the depth section by section.

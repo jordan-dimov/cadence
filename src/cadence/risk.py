@@ -1,28 +1,34 @@
-"""Section 8: Governance, kill switches, and the compliance layer.
+"""Section 8: The safety gate every order must pass.
 
-Every order an automated trader sends passes one gate before it reaches the
-exchange. The gate enforces three things 2026 regulation now requires
-(REMIT II order-and-trade logging; ACER per-transaction algo data from
-29 Oct 2027; MiFID II-style controls): a position limit, a kill switch per
-strategy, a circuit breaker per book - and structural attribution, so every
-order is traceable to the strategy and parameters that produced it.
+A bot that places orders on its own is dangerous if nothing checks it. So
+before any order reaches the exchange, it passes through a gate that can say
+no. The gate enforces a few simple rules:
 
-This module ships two interchangeable governors:
+  - A position limit: never let a book build up a bigger bet than allowed.
+  - A kill switch: if we switch a strategy off, none of its orders get
+    through.
+  - A circuit breaker: if we halt a book, nothing trades on it.
+  - Attribution: every order must say which strategy created it, so we can
+    always trace later who did what (regulators now require exactly this).
 
-  - `InProcessGovernor`: pure Python, the same rules as cadence.morph,
-    runnable with no infrastructure. The teaching default.
-  - `MorphologGovernor`: drives the Morpholog runtime (cadence.morph), so
-    the position limit and gates are enforced *outside* the trading code -
-    an unlawful order is refused by the runtime and cannot be committed,
-    and the order-of-record is tamper-evident and replayable to any prior
-    instant. This is "audit-grade by construction": the property is the
-    runtime's, not a logging convention the bot has to be trusted to honour.
+This module ships the gate in two interchangeable versions, and the contrast
+between them is the real lesson of this section:
 
-`make_governor()` chooses by the CADENCE_GOVERNOR env var ("inprocess" |
-"morpholog"). The guide's Section 8 walks the Morpholog wiring; the point
-it makes is that almost none of the rule logic lives in Python once
-Morpholog holds it - this module's InProcessGovernor is what you no longer
-have to write and trust.
+  - `InProcessGovernor`: plain Python, holds everything in memory. Perfect
+    for learning and for running the examples with nothing else installed.
+  - `MorphologGovernor`: hands the rules to Morpholog, a separate engine that
+    stores the record properly and refuses, at the source, to ever record an
+    order that breaks a rule.
+
+On a small single-program demo like this one, the plain Python version is all
+you need, and Morpholog can look like overkill. Its value shows up when the
+demo grows up: when the program restarts and must not forget its position;
+when several bots trade the same book at once and must share one honest view
+of it; when an auditor needs a record that provably has not been tampered
+with and can be replayed to any moment in the past. Those are the things that
+turn the 50 lines below into thousands, and that is the job Morpholog is for.
+The guide builds the plain version first, then deliberately breaks it to show
+where Morpholog earns its place.
 """
 
 from __future__ import annotations
@@ -34,9 +40,13 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class Order:
-    """An order proposed by the bot. Attribution is structural: an order
-    cannot be constructed without naming the strategy and book. signed_qty
-    carries direction (buy positive, sell negative)."""
+    """One order the bot wants to place.
+
+    Notice you cannot even create an order without naming the `strategy` that
+    produced it and the `book` it belongs to. That is attribution built in:
+    an unlabelled order is impossible. `signed_qty` carries direction, a
+    positive number buys, a negative number sells.
+    """
 
     order_id: str
     strategy: str
@@ -47,12 +57,18 @@ class Order:
 
 @dataclass(frozen=True)
 class Decision:
+    """The gate's answer: was the order allowed, and if not, why not."""
+
     admitted: bool
     reason: str = ""
 
 
 class Governor(Protocol):
-    """The pre-trade gate. The bot proposes; the governor decides."""
+    """The shape of a safety gate. The bot proposes orders; the gate decides.
+
+    Both versions below follow this same shape, so the bot does not know or
+    care which one it is talking to.
+    """
 
     def open_book(self, book: str, limit: float) -> None: ...
     def enable_strategy(self, strategy: str) -> None: ...
@@ -63,8 +79,9 @@ class Governor(Protocol):
 
 @dataclass
 class InProcessGovernor:
-    """Pure-Python governor mirroring cadence.morph. Useful, and exactly the
-    code you delete once Morpholog enforces the same rules."""
+    """The plain-Python safety gate. Simple, and exactly the code you no
+    longer have to write (and trust) once Morpholog enforces the same rules.
+    """
 
     _enabled: set[str] = field(default_factory=set)
     _open: set[str] = field(default_factory=set)
@@ -74,105 +91,125 @@ class InProcessGovernor:
     _ids: set[str] = field(default_factory=set)
 
     def open_book(self, book: str, limit: float) -> None:
+        """Open a book for trading, with a maximum position size."""
         if limit < 0:
-            raise ValueError("limit must be non-negative")
+            raise ValueError("the limit cannot be negative")
         self._open.add(book)
         self._limit[book] = limit
         self._net.setdefault(book, 0.0)
 
     def enable_strategy(self, strategy: str) -> None:
+        """Allow a strategy's orders through the gate."""
         self._enabled.add(strategy)
 
     def engage_kill_switch(self, strategy: str) -> None:
+        """Switch a strategy off. Its orders will now be refused."""
         self._enabled.discard(strategy)
 
     def halt_book(self, book: str) -> None:
+        """Stop all trading on a book."""
         self._open.discard(book)
 
     def admit(self, order: Order) -> Decision:
+        """Decide whether to let an order through, and remember it if so."""
         if order.order_id in self._ids:
-            return Decision(False, "duplicate order id")
+            return Decision(False, "we have already seen this order id")
         if order.strategy not in self._enabled:
-            return Decision(False, f"strategy '{order.strategy}' not enabled")
+            return Decision(False, f"strategy '{order.strategy}' is switched off")
         if order.book not in self._open:
-            return Decision(False, f"book '{order.book}' not open")
+            return Decision(False, f"book '{order.book}' is not open")
         limit = self._limit[order.book]
-        new_net = self._net[order.book] + order.signed_qty
-        if abs(new_net) > limit:
+        new_position = self._net[order.book] + order.signed_qty
+        if abs(new_position) > limit:
             return Decision(
                 False,
-                f"would breach position limit on '{order.book}': "
-                f"|{new_net:.1f}| > {limit:.1f}",
+                f"would push book '{order.book}' over its limit "
+                f"({abs(new_position):.1f} beyond the allowed {limit:.1f})",
             )
-        # Admit: append-only record, advance net position.
-        self._net[order.book] = new_net
+        # Allowed: record the order and update the running position.
+        self._net[order.book] = new_position
         self._log.append(order)
         self._ids.add(order.order_id)
         return Decision(True)
 
     @property
     def order_log(self) -> list[Order]:
-        """The append-only order of record. Under Morpholog this is the
-        governed claim set, replayable as-of any prior transition."""
+        """The list of orders that were allowed through, in order.
+
+        In the plain-Python version this is just a list, which is exactly the
+        weakness: anyone could change it or lose it on a restart. The
+        Morpholog version turns it into a proper, tamper-evident record.
+        """
         return list(self._log)
 
 
 class MorphologUnavailable(RuntimeError):
-    pass
+    """Raised when the Morpholog-backed gate is asked for but its engine is
+    not set up. The plain-Python gate above needs none of that."""
 
 
 class MorphologGovernor:
-    """Drives the Morpholog runtime over cadence.morph. Order admission is a
-    proposed `admit_order` transformation; the runtime commits it or refuses
-    it. The position limit lives in the `net_position_within_limit`
-    invariant, so this class proposes and reads - it does not re-implement
-    the limit.
+    """The same safety gate, but enforced by Morpholog instead of by Python.
 
-    Consumed the way any non-Rust system consumes Morpholog: the typed
-    client generated by `morpholog generate python-client cadence.morph
-    --out src/cadence/_morph_client`, over a subprocess to the `morpholog`
-    binary and a PostgreSQL database. Section 8 of the guide walks this end
-    to end. Kept thin on purpose: the rules are in cadence.morph, not here.
+    The difference that matters: the position limit is written down as a rule
+    inside Morpholog, and Morpholog simply will not record an order that
+    breaks it, no matter how the order arrives. The rules live in the file
+    cadence.morph next to this code, where a risk officer or auditor can read
+    them without reading any Python.
+
+    Setting it up needs the `morpholog` program, a throwaway database, and a
+    one-off step to generate the typed client:
+
+        morpholog generate python-client cadence.morph --out src/cadence/_morph_client
+
+    The methods are left for the guide's Section 8 to fill in, so that the
+    examples here keep running with nothing extra installed. The point the
+    guide makes is that almost none of the rule-checking ends up in Python
+    once Morpholog holds the rules: the plain version above is what you get
+    to delete.
     """
 
     def __init__(self, database_url: str | None = None) -> None:
         self._database_url = database_url or os.environ.get("DATABASE_URL")
         try:
-            # Generated client; present only after `morpholog generate`.
+            # This client only exists after the "generate" step above.
             from cadence._morph_client import Morpholog  # type: ignore
-        except ImportError as exc:  # pragma: no cover - infra-dependent
+        except ImportError as exc:  # pragma: no cover - needs external setup
             raise MorphologUnavailable(
-                "Morpholog client not generated. Run: "
+                "Morpholog client not generated yet. Run: "
                 "morpholog generate python-client cadence.morph "
                 "--out src/cadence/_morph_client"
             ) from exc
         if not self._database_url:
-            raise MorphologUnavailable("set DATABASE_URL to a disposable PG db")
+            raise MorphologUnavailable(
+                "set DATABASE_URL to a throwaway database first"
+            )
         self._client = Morpholog("cadence.morph", self._database_url)
 
-    # The methods below map one-to-one onto cadence.morph transformations.
-    # Bodies are intentionally left for the Section 8 walkthrough so the
-    # repo's runnable default stays infra-free; the client surface is:
-    #   self._client.submit(<generated request model>) -> Committed | Rejected
+    # Each method below matches one rule-changing action in cadence.morph.
     def open_book(self, book: str, limit: float) -> None:  # pragma: no cover
-        raise NotImplementedError("wired in guide Section 8")
+        raise NotImplementedError("filled in during guide Section 8")
 
     def enable_strategy(self, strategy: str) -> None:  # pragma: no cover
-        raise NotImplementedError("wired in guide Section 8")
+        raise NotImplementedError("filled in during guide Section 8")
 
     def engage_kill_switch(self, strategy: str) -> None:  # pragma: no cover
-        raise NotImplementedError("wired in guide Section 8")
+        raise NotImplementedError("filled in during guide Section 8")
 
     def halt_book(self, book: str) -> None:  # pragma: no cover
-        raise NotImplementedError("wired in guide Section 8")
+        raise NotImplementedError("filled in during guide Section 8")
 
     def admit(self, order: Order) -> Decision:  # pragma: no cover
-        raise NotImplementedError("wired in guide Section 8")
+        raise NotImplementedError("filled in during guide Section 8")
 
 
 def make_governor(kind: str | None = None) -> Governor:
-    """Factory. CADENCE_GOVERNOR=morpholog selects the runtime-backed
-    governor; anything else (the default) is the in-process one."""
+    """Pick which safety gate to use.
+
+    By default you get the plain-Python gate, which needs nothing extra. Set
+    the environment variable CADENCE_GOVERNOR=morpholog to use the
+    Morpholog-backed one instead.
+    """
     kind = kind or os.environ.get("CADENCE_GOVERNOR", "inprocess")
     if kind == "morpholog":
         return MorphologGovernor()

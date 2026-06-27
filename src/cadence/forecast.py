@@ -1,17 +1,27 @@
-"""Section 3: Forecasting as code.
+"""Section 3: Guessing tomorrow's numbers.
 
-The load-bearing teaching point lives here: a forecast must be a
-*distribution*, not a point, because the sizing decision in Section 4 is
-asymmetric. A point forecast of 40 MWh hides whether the spread is +/-2 or
-+/-20, and the optimal bid depends entirely on that spread.
+Before Alice can decide how much power to sell, she has to guess how much
+the wind will make, and what prices will do. That guessing is forecasting.
 
-So `PriceForecaster` returns a `ForecastDistribution`, not a float. The
-baseline here is a deliberately simple climatology-plus-residual model;
-the guide climbs the ladder from this to gradient-boosted trees and
-sequence models (LSTM / TCN / Transformer), and discusses why desks keep
-a parsimonious, explainable core for regulatory reasons (Section 8). Many
-desks buy this layer (e.g. Volue Insight) rather than build it; we build it
-so you understand what you would otherwise rent.
+The one idea this module is built to teach: a useful forecast is not a
+single number. "The wind will make 40 MWh tomorrow" is almost useless on its
+own, because it hides how sure you are. Compare two forecasts that both say
+40:
+
+  - Forecast A: "40, and I am very confident, it will land within a MWh or
+    two."
+  - Forecast B: "40, but honestly it could easily be 20 or 60."
+
+Those should lead to very different decisions (the next module, sizing,
+shows exactly how). So a forecast here is always a *range of possibilities*
+with a most likely value in the middle, not a lone number.
+
+To keep the example runnable and simple, we describe that range with just
+two things: a middle value (the average) and a spread (how wide the range
+is). Real trading desks use far richer models, and often buy this part
+ready-made from specialist vendors such as Volue rather than build it. We
+build a simple one anyway, so you understand what you would otherwise be
+renting.
 """
 
 from __future__ import annotations
@@ -23,33 +33,47 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ForecastDistribution:
-    """A predictive distribution over one quantity (price or generation),
-    summarised as a mean and standard deviation of an assumed-normal law.
-    Real forecasters return quantiles or scenario ensembles; the interface
-    is what matters - `quantile` and `scenarios` are what Section 4 consumes.
+    """A forecast expressed as a range, not a single number.
+
+    `mean` is the most likely value (the centre of the range). `std`, short
+    for standard deviation, is how spread out the range is: small means
+    confident, large means uncertain.
     """
 
     mean: float
     std: float
 
     def quantile(self, q: float) -> float:
-        """Inverse-CDF. The sizing optimiser asks for a fractile, not a
-        mean - this is the seam between forecasting and decision."""
+        """Answer questions of the form "what value will the outcome stay
+        below this fraction of the time?"
+
+        For example, quantile(0.5) is the middle value (half the time the
+        outcome is below it). quantile(0.9) is a high value the outcome only
+        beats 10% of the time. The sizing module uses this to ask the
+        forecast for a deliberately cautious number.
+        """
         if not 0.0 < q < 1.0:
-            raise ValueError("quantile q must be in (0, 1)")
+            raise ValueError("the fraction q must be between 0 and 1")
         from statistics import NormalDist
 
         return NormalDist(self.mean, self.std).inv_cdf(q)
 
     def scenarios(self, n: int, seed: int = 0) -> np.ndarray:
+        """Draw `n` example outcomes from the range, for when you want to
+        try a decision against many possible futures rather than reason
+        about the range mathematically."""
         rng = np.random.default_rng(seed)
         return rng.normal(self.mean, self.std, n)
 
 
 class PriceForecaster:
-    """A baseline climatology forecaster: predict each period from the mean
-    and dispersion of its historical analogues. Honest and weak on purpose;
-    Section 3 replaces the internals, not the interface.
+    """A deliberately simple forecaster: look at what happened in the past,
+    and assume the future looks similar.
+
+    It takes a history of past values and summarises them as a middle value
+    and a spread. That is about the weakest honest forecast you can make, and
+    that is the point: the guide starts here and then improves the forecast
+    without changing how the rest of the bot uses it.
     """
 
     def __init__(self) -> None:
@@ -57,13 +81,15 @@ class PriceForecaster:
         self._std: float | None = None
 
     def fit(self, history: np.ndarray) -> "PriceForecaster":
+        """Learn from past values: their average, and how much they varied."""
         if history.size == 0:
-            raise ValueError("cannot fit on empty history")
+            raise ValueError("cannot learn from an empty history")
         self._mean = float(np.mean(history))
         self._std = float(np.std(history)) or 1.0
         return self
 
     def predict(self) -> ForecastDistribution:
+        """Hand back the forecast as a range (a middle value and a spread)."""
         if self._mean is None or self._std is None:
-            raise RuntimeError("call fit() before predict()")
+            raise RuntimeError("call fit() with some history before predict()")
         return ForecastDistribution(self._mean, self._std)
