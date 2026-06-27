@@ -54,6 +54,10 @@ jobs:
         with:
           workspaces: morpholog
       - name: Build the morpholog CLI
+        # Build against Morpholog's committed .sqlx offline cache, not the live
+        # DATABASE_URL (whose schema is not provisioned until the test runs).
+        env:
+          SQLX_OFFLINE: "true"
         run: cargo build -p morpholog-cli --manifest-path morpholog/Cargo.toml
 
       - name: Generate the Morpholog client
