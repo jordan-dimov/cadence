@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
 authors = [{ name = "Jordan Dimov" }]
-# Pure-Python core depends only on numpy + pandas and runs with `uv sync`.
+# Pure-Python core depends only on numpy and runs with `uv sync`.
 # The governance layer (src/cadence/risk.py) can be backed by Morpholog
 # (github.com/jordan-dimov/morpholog), consumed as an external CLI binary
 # + PostgreSQL, NOT a pip dependency. Absent that, an in-process governor

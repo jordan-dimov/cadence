@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from cadence import data
-from cadence.backtest import backtest_signal, walk_forward
+from cadence.backtest import backtest_signal, score_by_period
 from cadence.execution import (
     FillReconciler,
     cost_of_waiting,
@@ -16,9 +16,9 @@ from cadence.execution import (
     urgency_schedule,
 )
 from cadence.forecast import ForecastDistribution, Forecaster
-from cadence.pipeline import compare_perfect_and_realistic, run_day
+from cadence.pipeline import compare_perfect_and_realistic, run_day, run_period
 from cadence.risk import InProcessGovernor, Order, make_governor
-from cadence.signals import rolling_zscore, zscore_signals
+from cadence.signals import rolling_zscore, run_stat_arb, zscore_signals
 from cadence.sizing import optimal_volume
 
 
@@ -87,11 +87,21 @@ def test_backtest_charges_costs_and_impact():
     assert costed.n_trades >= 0
 
 
-def test_walk_forward_gives_many_scores():
+def test_score_by_period_gives_many_scores():
     gap = data.simulated_country_gap(days=60, seed=4)
     sig = zscore_signals(gap, window=14 * 24, threshold=2.0)
-    folds = walk_forward(gap, sig, n_folds=4)
-    assert len(folds) == 4  # one out-of-sample score per chunk
+    folds = score_by_period(gap, sig, n_folds=4)
+    assert len(folds) == 4  # one score per stretch of history
+
+
+def test_stat_arb_lifecycle_opens_and_closes():
+    gap = data.simulated_country_gap(days=90, seed=2)
+    trades = run_stat_arb(gap, window=14 * 24)
+    assert trades  # the bot actually takes some round trips
+    # Every trade is a complete round trip: it exits after it enters, one way.
+    for t in trades:
+        assert t.exit > t.entry
+        assert t.direction in (-1, 1)
 
 
 def test_perfect_foresight_costs_less_than_realistic():
@@ -126,7 +136,13 @@ def test_make_governor_rejects_unknown_kind():
         make_governor("morphlog")
 
 
-def test_pipeline_runs_and_respects_limit():
-    result = run_day(seed=5, position_limit=500.0)
+def test_pipeline_period_runs_and_respects_limit():
+    result = run_period(seed=5, position_limit=500.0)
     assert result.admitted_orders + result.refused_orders == 8
     assert result.sold_mwh >= 0
+
+
+def test_day_is_the_period_loop():
+    day = run_day(seed=5, n_periods=4)
+    assert day.periods == 4
+    assert day.admitted_orders + day.refused_orders == 4 * 8

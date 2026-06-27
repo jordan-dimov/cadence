@@ -19,9 +19,11 @@ guards against each:
     against you, so `impact` adds a cost that grows with the size of the
     trade, not just the number of trades.
 
-And it tests honestly: `walk_forward` scores the strategy on several
-successive out-of-sample chunks rather than one split, the way live trading
-only ever knows the past.
+And it checks stability honestly: `score_by_period` runs the same fixed rule
+over several successive stretches of history rather than scoring it once, so
+you can see whether it behaves reasonably across different conditions. (That
+is the first, smaller question; full walk-forward optimisation, which re-tunes
+the rule on each window, is a step beyond this.)
 """
 
 from __future__ import annotations
@@ -107,26 +109,25 @@ def backtest_signal(
     )
 
 
-def walk_forward(
+def score_by_period(
     gap: np.ndarray,
     signals: np.ndarray,
     n_folds: int = 4,
     cost_per_trade: float = 0.5,
     impact: float = 0.0,
 ) -> list[BacktestResult]:
-    """Score the strategy on several successive out-of-sample chunks, instead
-    of one split.
+    """Score the same fixed rule over several successive stretches of history,
+    instead of scoring it once over the whole thing.
 
-    A single train/test split gives you one number, and it is chosen knowing
-    how the whole history played out. Walk-forward instead cuts the history
-    into `n_folds` successive pieces and backtests each in turn, so you get
-    many out-of-sample scores and only ever judge a piece on its own stretch
-    of time, the way live trading only ever knows the past.
+    One score over all of history hides whether the strategy was steady or
+    just got lucky in one stretch. This cuts the history into `n_folds`
+    successive pieces and backtests each in turn, so you can see whether the
+    rule behaves reasonably across different conditions.
 
-    Note this is the simple version: it only answers "was performance stable
-    across time?". It does not re-tune the strategy on each window (full
-    walk-forward optimisation), which is safe here only because this z-score
-    signal already looks at nothing but the past.
+    This answers the smaller question: "was performance stable across time?".
+    It is not full walk-forward optimisation, which would re-tune the rule on
+    each window. That distinction matters, and it is safe to skip the re-tuning
+    here only because this z-score rule already looks at nothing but the past.
     """
     if n_folds < 1:
         raise ValueError("n_folds must be at least 1")

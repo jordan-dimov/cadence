@@ -5,7 +5,14 @@
 
 import numpy as np
 
-from cadence.execution import cost_of_waiting, twap_schedule, urgency_schedule
+from cadence import data
+from cadence.execution import (
+    FillReconciler,
+    cost_of_waiting,
+    liquidity_aware_clip,
+    twap_schedule,
+    urgency_schedule,
+)
 
 total, slices = 100.0, 4
 print(f"Sell {total:.0f} MWh in {slices} pieces.\n")
@@ -13,7 +20,21 @@ print("Even (TWAP)        :", np.round(twap_schedule(total, slices), 1))
 print("Front-loaded (a=0.5):", np.round(urgency_schedule(total, slices, 0.5), 1))
 print("Back-loaded  (a=2.0):", np.round(urgency_schedule(total, slices, 2.0), 1))
 print()
+
+book = data.simulated_orderbook(seed=1)
+clip = liquidity_aware_clip(total, book, side="sell")
+print(f"Liquidity-aware: with {book.bid_sizes[0]:.1f} MWh resting at the best")
+print(f"bid, the next sell piece is capped at {clip:.1f} MWh.")
+print()
+
 cow = cost_of_waiting(prob_unfilled_at_gate=0.2, expected_imbalance_price=150.0)
 print("Cost of waiting: a 20% chance of still being unfilled at gate closure,")
 print(f"at an imbalance price of 150, costs {cow:.0f} GBP/MWh on average. That")
 print("is why power execution leans on the deadline, not just the best price.")
+print()
+
+rec = FillReconciler(target=clip)
+rec.record_fill(clip / 3)   # the exchange only filled part of it
+print(f"Sent {clip:.1f} MWh; only {clip / 3:.1f} filled. Still working: "
+      f"{rec.residual:.1f} MWh.")
+print("Never assume an order filled in full: your position is a belief.")

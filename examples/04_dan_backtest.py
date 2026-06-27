@@ -5,16 +5,25 @@
 
 from cadence import data
 from cadence.backtest import backtest_signal
-from cadence.signals import zscore_signals
+from cadence.signals import run_stat_arb, zscore_signals
 
 gap = data.simulated_country_gap(days=90, seed=2)
 signal = zscore_signals(gap, window=14 * 24, threshold=2.0)
 
+print("Dan trades the price gap between two countries when it looks unusual.\n")
+
+# A signal is not a strategy. The lifecycle goes in, holds, and comes out.
+trades = run_stat_arb(gap, window=14 * 24)
+print(f"Round trips taken by the bot: {len(trades)}")
+if trades:
+    first = trades[0]
+    held = first.exit - first.entry
+    way = "sold the gap" if first.direction == -1 else "bought the gap"
+    print(f"  first round trip: {way}, held {held} hours, made {first.pnl:+.1f}")
+print()
+
 free = backtest_signal(gap, signal, cost_per_trade=0.0)
 real = backtest_signal(gap, signal, cost_per_trade=0.5, impact=0.2)
-
-print("Dan trades the price gap between two countries when it looks unusual.\n")
-print(f"Trades taken: {real.n_trades}\n")
 print(f"P&L if trading were free  : {free.pnl:8.1f}")
 print(f"P&L with costs and impact : {real.pnl:8.1f}")
 print(f"Worst drawdown (with costs): {real.max_drawdown:8.1f}")
