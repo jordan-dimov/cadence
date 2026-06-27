@@ -241,6 +241,23 @@ class MorphologGovernor:
             )
         )
 
+    def record_fill(self, fill_id: str, order_id: str, qty: float) -> Decision:
+        """Record a fill the exchange reported against an order. The runtime
+        refuses a fill against an unknown order, and refuses any fill that would
+        take the order past the size it was admitted for (the overfill rule).
+
+        This is what the in-process FillReconciler does in Python, but here it
+        is part of the same governed record as the order, so the order and how
+        much of it has filled cannot drift apart.
+        """
+        return self._submit(
+            self._models.RecordFillRequest(
+                fill_id=fill_id,
+                order_id=order_id,
+                qty=Decimal(str(qty)),
+            )
+        )
+
 
 def make_governor(kind: str | None = None) -> Governor:
     """Pick which safety gate to use.

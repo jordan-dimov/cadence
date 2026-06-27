@@ -49,6 +49,15 @@ predicate OrderAdmitted(order_id: Subject, strategy: Subject, book: Subject, sig
     unique by (order_id)
     append only
 
+-- A fill the exchange reported against an order: how much of it actually
+-- traded. An order can fill in pieces (partial fills), so several fills may
+-- land for one order. Each fill id appears once, and fills are only ever
+-- added. The rule that their total may never exceed the order's size lives
+-- below, so the trading code does not need a Python reconciler to enforce it.
+predicate OrderFilled(fill_id: Subject, order_id: Subject, qty: Decimal)
+    unique by (fill_id)
+    append only
+
 -- Each book's current net position, worked out by Morpholog from the orders
 -- themselves (the calculation is at the bottom of the file). The bot does
 -- not keep its own running tally and hope it stays correct: it just asks
@@ -57,6 +66,7 @@ predicate OrderAdmitted(order_id: Subject, strategy: Subject, book: Subject, sig
 predicate NetPosition(book: Subject, qty: Decimal)
 
 intent OrderPlaced(order_id: Subject, strategy: Subject, book: Subject, signed_qty: Decimal, price: Decimal)
+intent FillRecorded(fill_id: Subject, order_id: Subject, qty: Decimal)
 intent StrategyKillSwitchEngaged(strategy: Subject)
 intent BookHalted(book: Subject)
 
@@ -85,6 +95,18 @@ invariant order_has_size:
 
 invariant order_price_positive:
     OrderAdmitted(_, _, _, _, p) implies p > 0
+
+-- A fill is a positive amount.
+invariant fill_quantity_positive:
+    OrderFilled(_, _, qty) implies qty > 0
+
+-- The overfill rule, in the data. An order can fill in pieces, but the total
+-- filled may never exceed the size it was admitted for. In plain Python this
+-- lives in a separate FillReconciler that nothing ties to the order; here it
+-- is one invariant across the two facts, so no fill can ever overshoot, by any
+-- path. (abs(...) because a sell order's quantity is negative.)
+invariant fills_within_order:
+    OrderAdmitted(order_id, _, _, signed_qty, _) implies sum(q | OrderFilled(_, order_id, q)) <= abs(signed_qty)
 
 -- ---------------------------------------------------------------------
 -- The actions. These are the only ways anything can change. Each one is
@@ -120,6 +142,16 @@ transformation admit_order(order_id, strategy, book, signed_qty, price):
     require StrategyEnabled(strategy) and BookOpen(book)
     admit OrderAdmitted(order_id, strategy, book, signed_qty, price)
     emit OrderPlaced(order_id, strategy, book, signed_qty, price)
+
+-- Record a fill the exchange reported. It is refused unless the order exists,
+-- and the fills_within_order rule above refuses it if it would take the order
+-- past the amount it was admitted for. So the runtime cannot record an
+-- overfill, and "how much is filled" is part of the same governed record as
+-- the order itself, not a separate Python counter that could drift.
+transformation record_fill(fill_id, order_id, qty):
+    require OrderAdmitted(order_id, _, _, _, _)
+    admit OrderFilled(fill_id, order_id, qty)
+    emit FillRecorded(fill_id, order_id, qty)
 
 -- The calculation behind NetPosition near the top: for every book that has a
 -- limit, add up the quantities of all its orders (buys positive, sells

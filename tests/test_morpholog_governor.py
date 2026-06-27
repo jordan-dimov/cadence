@@ -69,3 +69,21 @@ def test_attribution_is_recorded_and_within_limit_orders_accumulate():
     assert gov.admit(Order(f"b-{book}", strat, book, 40, 80)).admitted
     # A third would take the total to 120, over the limit: refused.
     assert not gov.admit(Order(f"c-{book}", strat, book, 40, 80)).admitted
+
+
+def test_runtime_refuses_overfill():
+    book, strat = _fresh_names()
+    gov = MorphologGovernor()
+    gov.open_book(book, limit=100.0)
+    gov.enable_strategy(strat)
+    order_id = f"o-{book}"
+    assert gov.admit(Order(order_id, strat, book, 40, 80)).admitted
+
+    # Partial fills accumulate up to the order's size.
+    assert gov.record_fill(f"f1-{book}", order_id, 25).admitted
+    assert gov.record_fill(f"f2-{book}", order_id, 15).admitted
+    # A further fill would take the total to 50, past the order's 40: refused
+    # by the runtime invariant, not by any Python reconciler.
+    overfill = gov.record_fill(f"f3-{book}", order_id, 10)
+    assert not overfill.admitted
+    assert overfill.reason
