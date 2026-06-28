@@ -87,3 +87,22 @@ def test_runtime_refuses_overfill():
     overfill = gov.record_fill(f"f3-{book}", order_id, 10)
     assert not overfill.admitted
     assert overfill.reason
+
+
+def test_trader_cannot_raise_their_own_limit():
+    book, _ = _fresh_names()
+    trader = f"alice-{book}"
+    risk_officer = f"risk-{book}"
+    gov = MorphologGovernor()
+    gov.open_book(book, limit=100.0)
+    gov.assign_trader(book, trader)
+    gov.grant_limit_authority(risk_officer)
+
+    # The trader trying to raise their own limit: refused (four-eyes).
+    assert not gov.change_position_limit(book, 100.0, 200.0, actor=trader).admitted
+    # An actor with no limit authority: also refused.
+    assert not gov.change_position_limit(
+        book, 100.0, 200.0, actor=f"nobody-{book}"
+    ).admitted
+    # An authorised, independent risk actor: allowed.
+    assert gov.change_position_limit(book, 100.0, 200.0, actor=risk_officer).admitted

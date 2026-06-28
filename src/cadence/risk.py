@@ -203,14 +203,19 @@ class MorphologGovernor:
         # Provision the schema for this programme (idempotent).
         self._client.init(skip_if_exists=True)
 
-    def _submit(self, request: object) -> Decision:
-        """Propose one transformation; map the outcome onto a Decision."""
+    def _submit_as(self, request: object, actor: str) -> Decision:
+        """Propose one transformation as `actor`; map the outcome to a Decision.
+        The actor matters wherever a rule names it (the segregation-of-duties
+        check below), which is why it is a parameter rather than always ACTOR."""
         from cadence.morpholog_client import envelopes
 
-        outcome = self._client.submit(request, self.ACTOR)
+        outcome = self._client.submit(request, actor)
         if isinstance(outcome, envelopes.Committed):
             return Decision(True)
         return Decision(False, outcome.reason)
+
+    def _submit(self, request: object) -> Decision:
+        return self._submit_as(request, self.ACTOR)
 
     def open_book(self, book: str, limit: float) -> None:
         decision = self._submit(
@@ -256,6 +261,34 @@ class MorphologGovernor:
                 order_id=order_id,
                 qty=Decimal(str(qty)),
             )
+        )
+
+    # --- Segregation of duties (who may change the rules) -----------------
+    # These are governance the in-process gate has no way to express: they
+    # turn on *who* is acting, not just what they are doing.
+
+    def assign_trader(self, book: str, trader: str) -> None:
+        """Record who trades a book (setup)."""
+        self._submit(self._models.AssignTraderRequest(book=book, trader=trader))
+
+    def grant_limit_authority(self, principal: str) -> None:
+        """Grant the risk-desk power to change position limits."""
+        self._submit(self._models.GrantLimitAuthorityRequest(principal=principal))
+
+    def change_position_limit(
+        self, book: str, current_limit: float, new_limit: float, actor: str
+    ) -> Decision:
+        """Change a book's position limit, acting as `actor`. Refused unless
+        the actor holds limit authority AND is not the book's own trader: a
+        trader can never raise their own limit (four-eyes), and the runtime,
+        not the trading code, is what enforces the separation."""
+        return self._submit_as(
+            self._models.ChangePositionLimitRequest(
+                book=book,
+                current_limit=Decimal(str(current_limit)),
+                new_limit=Decimal(str(new_limit)),
+            ),
+            actor,
         )
 
 

@@ -41,6 +41,15 @@ predicate BookOpen(book: Subject)
 predicate PositionLimit(book: Subject, limit: Decimal)
     unique by (book)
 
+-- Who trades a book. The trader is the person who would benefit from a bigger
+-- limit, so the four-eyes rule below keeps them from raising it themselves.
+predicate BookTrader(book: Subject, trader: Subject)
+    unique by (book)
+
+-- Authority to change position limits: a risk-desk power, granted and revoked
+-- as claims, so it can be given and taken away and the audit shows when.
+predicate MayManageLimits(principal: Subject)
+
 -- A recorded order. Notice it must name the strategy and book it belongs
 -- to, so every order is traceable. The quantity is positive for a buy and
 -- negative for a sell. Each order id appears once, and orders are only ever
@@ -69,6 +78,10 @@ intent OrderPlaced(order_id: Subject, strategy: Subject, book: Subject, signed_q
 intent FillRecorded(fill_id: Subject, order_id: Subject, qty: Decimal)
 intent StrategyKillSwitchEngaged(strategy: Subject)
 intent BookHalted(book: Subject)
+intent BookTraderAssigned(book: Subject, trader: Subject)
+intent LimitAuthorityGranted(principal: Subject)
+intent LimitAuthorityRevoked(principal: Subject)
+intent PositionLimitChanged(book: Subject, limit: Decimal, by: Subject)
 
 -- ---------------------------------------------------------------------
 -- The rules. These must always stay true. Morpholog refuses any action
@@ -129,6 +142,39 @@ transformation halt_book(book):
     require BookOpen(book)
     retract BookOpen(book)
     emit BookHalted(book)
+
+-- ---------------------------------------------------------------------
+-- Who may do what: segregation of duties. The rules above say what is
+-- allowed; these say who may set the rules, and enforce a four-eyes
+-- separation so the person who benefits cannot also approve.
+-- ---------------------------------------------------------------------
+
+-- Record who trades a book (setup).
+transformation assign_trader(book, trader):
+    admit BookTrader(book, trader)
+    emit BookTraderAssigned(book, trader)
+
+-- Grant and revoke the authority to change limits (a risk-desk power).
+transformation grant_limit_authority(principal):
+    admit MayManageLimits(principal)
+    emit LimitAuthorityGranted(principal)
+
+transformation revoke_limit_authority(principal):
+    require MayManageLimits(principal)
+    retract MayManageLimits(principal)
+    emit LimitAuthorityRevoked(principal)
+
+-- Change a book's position limit. This is not a plain permission check. The
+-- actor must hold limit authority AND must not be the book's own trader, so a
+-- trader can never raise their own limit (four-eyes); only an authorised,
+-- independent risk actor can. `actor` is whoever is performing the action;
+-- `trader` is bound from the book's BookTrader, and `actor != trader` is the
+-- separation that turns authorisation into segregation of duties.
+transformation change_position_limit(book, current_limit, new_limit):
+    require MayManageLimits(actor) and BookTrader(book, trader) and PositionLimit(book, current_limit) and actor != trader
+    retract PositionLimit(book, current_limit)
+    admit PositionLimit(book, new_limit)
+    emit PositionLimitChanged(book, new_limit, actor)
 
 -- Place an order. It is refused straight away unless its strategy is
 -- switched on and its book is open. Then the position rule above refuses it
