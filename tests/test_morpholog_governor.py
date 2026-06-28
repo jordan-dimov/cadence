@@ -106,3 +106,26 @@ def test_trader_cannot_raise_their_own_limit():
     ).admitted
     # An authorised, independent risk actor: allowed.
     assert gov.change_position_limit(book, 100.0, 200.0, actor=risk_officer).admitted
+
+
+def test_governed_record_exports_and_tamper_is_caught(tmp_path):
+    book, strat = _fresh_names()
+    gov = MorphologGovernor()
+    gov.open_book(book, limit=100.0)
+    gov.enable_strategy(strat)
+    order_id = f"o1-{book}"
+    gov.admit(Order(order_id, strat, book, 40, 73.5))  # 73.5: a distinctive value
+    gov.record_fill(f"f1-{book}", order_id, 25)
+
+    pack = tmp_path / "evidence.json"
+    gov.export_evidence(str(pack))
+    # The honest record verifies offline, with no database.
+    assert gov.verify_evidence(str(pack))
+
+    # Alter one recorded value and the verification fails: a regulator would
+    # catch an edited record without trusting whoever produced it.
+    original = pack.read_text()
+    tampered = original.replace("73.5", "99.9", 1)
+    assert tampered != original  # we really changed a recorded value
+    pack.write_text(tampered)
+    assert not gov.verify_evidence(str(pack))

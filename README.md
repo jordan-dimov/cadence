@@ -84,7 +84,9 @@ when the demo grows up:
 - several bots trade the same book at once and must share one honest view of
   the position;
 - an auditor needs a record that provably has not been altered and can be
-  wound back to any moment in the past.
+  wound back to any moment in the past. (`MorphologGovernor.export_evidence`
+  exports the record as a self-verifying pack; `verify_evidence` checks it
+  offline, and a single edited value fails the check.)
 
 Those are the things that turn a few dozen lines of Python into thousands.
 The guide builds the plain version first, then deliberately breaks it in

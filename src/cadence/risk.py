@@ -34,8 +34,10 @@ where Morpholog earns its place.
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass, field
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 
 
@@ -290,6 +292,40 @@ class MorphologGovernor:
             ),
             actor,
         )
+
+    # --- Audit: proving the governed record ------------------------------
+    # The order-and-fill record can be exported as a portable, offline-
+    # verifiable evidence pack: an auditor or regulator checks it without the
+    # database and without trusting the operator. This is operator integrity
+    # evidence over the trail, not the regulator's submission format itself,
+    # which a participant generates from these governed records.
+
+    def checkpoint(self) -> None:
+        """Seal a checkpoint (a tamper-evident tree head) over the current
+        record, so it can be exported and verified as of this point."""
+        self._client.checkpoint()
+
+    def export_evidence(self, path: str) -> None:
+        """Seal a checkpoint and export the whole governed record to `path`
+        as a self-verifying evidence pack (canonical JSON)."""
+        self.checkpoint()
+        assert self._database_url is not None  # guaranteed by __init__
+        # Export writes the canonical pack JSON to stdout; persist it verbatim
+        # so the offline verifier sees exactly what was exported.
+        proc = subprocess.run(
+            [self._client.binary, "evidence", "export",
+             "--database-url", self._database_url],
+            capture_output=True, text=True, check=True,
+        )
+        Path(path).write_text(proc.stdout)
+
+    def verify_evidence(self, path: str) -> bool:
+        """Offline-check an exported evidence pack (no database). True if the
+        record's tamper-evidence holds; False if any recorded row was altered."""
+        from cadence.morpholog_client import envelopes
+
+        verdict = self._client.evidence_verify(path)
+        return isinstance(verdict, envelopes.TreeIntact)
 
 
 def make_governor(kind: str | None = None) -> Governor:
